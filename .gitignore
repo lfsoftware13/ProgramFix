@@ -1,3 +1,11 @@
+# self ignored files
+
+data/
+config.py
+/trained_model/
+log/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
