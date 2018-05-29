@@ -1,5 +1,5 @@
 # self ignored files
-
+.idea/
 data/
 config.py
 /trained_model/

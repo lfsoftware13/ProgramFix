@@ -1,4 +1,4 @@
-from read_data.read_data import read_train_data_effect_all_c_error_records, read_train_data_all_c_error_records, \
+from read_data.read_data_from_db import read_train_data_effect_all_c_error_records, read_train_data_all_c_error_records, \
     read_compile_success_c_records, read_fake_common_c_error_records, read_fake_random_c_error_records
 from common.util import disk_cache, compile_c_code_by_gcc_c89, group_df_to_grouped_list
 from common.constants import CACHE_DATA_PATH

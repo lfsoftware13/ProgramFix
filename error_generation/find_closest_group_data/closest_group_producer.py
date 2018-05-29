@@ -8,7 +8,7 @@ import pandas as pd
 
 from c_parser.buffered_clex import BufferedCLex
 from common.analyse_include_util import remove_include
-from read_data.read_data import read_all_c_records, read_all_cpp_records
+from read_data.read_data_from_db import read_all_c_records, read_all_cpp_records
 
 from common.pycparser_util import init_pycparser, tokenize_by_clex, tokenize_error_count
 from common.util import parallel_map, compile_cpp_code_by_gcc, \

@@ -1,4 +1,4 @@
-from read_data.read_data import read_all_c_records
+from read_data.read_data_from_db import read_all_c_records
 from common.util import compile_c_code_by_gcc, chunks, parallel_map, reverse_dict
 from error_generation.find_closest_group_data.token_level_closest_text import init_c_code
 from common.constants import COMPILE_SUCCESS_DATA_DBPATH, C_COMPILE_SUCCESS_RECORDS, verdict, langdict
