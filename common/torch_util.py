@@ -230,6 +230,34 @@ def get_predict_and_target_tokens(log_probs, target, id_to_word_fn, k=1, offset=
     return batch_predict, batch_target, top_k_probs.tolist()
 
 
+def spilt_heads(x, num_heads):
+    """Split channels (dimension 2) into multiple heads (becomes dimension 1).
+
+    Args:
+      x: a Tensor with shape [batch, length, channels]
+      num_heads: an integer
+
+    Returns:
+      a Tensor with shape [batch, num_heads, length, channels / num_heads]
+    """
+    # reshape last dim
+    x_shape = list(x.shape)
+    # x_shape += x_shape[-1]//num_heads
+    x_shape = x_shape[:-1] + [num_heads, x_shape[-1]//num_heads]
+    x = x.view(x_shape)
+
+    x = torch.transpose(x, dim0=-3, dim1=-2)
+    return x
+
+
+def create_sequence_length_mask(token_length, max_len, gpu_index=None):
+    idxes = torch.arange(0, max_len, out=torch.Tensor(max_len)).unsqueeze(0)  # some day, you'll be able to directly do this on cuda
+    if gpu_index is not None:
+        idxes = idxes.cuda(gpu_index)
+    # mask = autograd.Variable((trans_to_cuda(idxes) < token_length.unsqueeze(1)).float())
+    mask = (idxes < token_length.unsqueeze(1).float())
+    return mask
+
+
 if __name__ == '__main__':
     a = []
-    calculate_accuracy_of_code_completion()

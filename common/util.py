@@ -418,7 +418,6 @@ def generate_mask(mask_index, size):
     return res
 
 
-
 def data_loader(dataset, batch_size, is_shuffle=True, drop_last=False, epoch_ratio=1.0):
     idxs = list(range(len(dataset)))
     if is_shuffle:
