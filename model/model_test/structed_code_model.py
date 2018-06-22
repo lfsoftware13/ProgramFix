@@ -2,6 +2,7 @@ import itertools
 import math
 import os
 import sys
+import time
 
 import torch.nn.functional as F
 import torch
@@ -13,7 +14,7 @@ from torch.utils.data import Dataset
 
 import config
 from common import torch_util
-from common.torch_util import create_sequence_length_mask
+from common.torch_util import create_sequence_length_mask, calculate_accuracy_of_code_completion
 from common.util import data_loader, PaddedList, show_process_map
 from experiment.experiment_util import load_common_error_data_sample_100, load_common_error_data
 from experiment.parse_xy_util import combine_spilt_tokens_batch, check_action_include_all_error, \
@@ -167,10 +168,12 @@ def combine_train(p_model, s_model, seq_model, dataset, batch_size, loss_fn, p_o
     end_token = vocab.word_to_id(vocab.end_tokens[0])
     gap_token = vocab.word_to_id(vocab.addition_tokens[0])
     step = 0
-    seq_count = torch.LongTensor([0])
     select_count = torch.LongTensor([0])
+    seq_count = torch.LongTensor([0])
+    decoder_input_count = torch.LongTensor([0])
     total_seq_loss = torch.Tensor([0])
     total_p_loss = torch.Tensor([0])
+    total_s_accuracy_top_k = {}
     for data in data_loader(dataset, batch_size=batch_size, is_shuffle=True, drop_last=True):
         p_model.zero_grad()
         s_model.zero_grad()
@@ -198,6 +201,7 @@ def combine_train(p_model, s_model, seq_model, dataset, batch_size, loss_fn, p_o
             masked_action_records = error_action_masks.byte() | masked_action_records.byte()
 
         include_all_error = check_action_include_all_error(masked_action_records, error_action_masks)
+        contain_all_error_count = torch.sum(include_all_error)
 
         tokens_tensor, token_length, part_ac_tokens_list, ac_token_length = combine_spilt_tokens_batch_with_tensor(
             output_records, data['ac_tokens'], masked_action_records, data['token_map'], gap_tensor, begin_tensor,
@@ -221,30 +225,49 @@ def combine_train(p_model, s_model, seq_model, dataset, batch_size, loss_fn, p_o
         s_loss = loss_fn(log_probs.view(-1, vocab.vocabulary_size), target_output_tensor.view(-1))
 
         remain_batch = torch.sum(masked_action_records, dim=1)
+        add_batch = torch.eq(remain_batch, 0).long()
+        remain_batch = remain_batch + add_batch
         total_batch = torch.sum(error_token_masks, dim=1)
-        delay_reward = delay_reward_fn(log_probs, target_output_tensor, total_batch, remain_batch)
+        force_error_rewards = (~include_all_error).float() * include_error_reward
+        delay_reward = delay_reward_fn(log_probs, target_output_tensor, total_batch, remain_batch, force_error_rewards)
         delay_reward = torch.unsqueeze(delay_reward, dim=1).expand(-1, max_len)
         delay_reward = delay_reward * error_token_masks.float()
 
-        baseline_reward = baseline_fn(delay_reward, error_token_masks)
-        total_reward = delay_reward - baseline_reward
+        if baseline_fn is not None:
+            baseline_reward = baseline_fn(delay_reward, error_token_masks)
+            total_reward = delay_reward - baseline_reward
+        else:
+            total_reward = delay_reward
 
-        force_error_rewards = torch.unsqueeze(~include_all_error, dim=1).float() * error_token_masks.float() * include_error_reward
+        # force_error_rewards = torch.unsqueeze(~include_all_error, dim=1).float() * error_token_masks.float() * include_error_reward
+        force_error_rewards = torch.unsqueeze(~include_all_error, dim=1).float() * error_token_masks.float() * 0
         p_loss = delay_loss_fn(action_probs_records, total_reward, error_token_masks, force_error_rewards)
 
-        print('train_type: {} step {} sequence model loss: {}, policy model loss: {}'.format(train_type, step, s_loss, p_loss))
-        sys.stdout.flush()
-        sys.stderr.flush()
         if math.isnan(p_loss):
             print('p_loss is nan')
             continue
+        # iterate record variable
         step += 1
-        one_select_count = torch.sum(ac_token_length_tensor)
-        select_count += torch.sum(ac_token_length_tensor).data.cpu()
-        total_seq_loss += s_loss.cpu().data.item() * one_select_count.float().cpu()
+        one_decoder_input_count = torch.sum(ac_token_length_tensor)
+        decoder_input_count += one_decoder_input_count.data.cpu()
+        total_seq_loss += s_loss.cpu().data.item() * one_decoder_input_count.float().cpu()
+
         one_seq_count = torch.sum(error_length)
         seq_count += one_seq_count.cpu()
         total_p_loss += p_loss.cpu().data.item() * one_seq_count.float().cpu()
+
+        s_accuracy_top_k = calculate_accuracy_of_code_completion(log_probs, target_output_tensor, ignore_token=TARGET_PAD_TOKEN, topk_range=(1, 5), gpu_index=gpu_index)
+        for key, value in s_accuracy_top_k.items():
+            total_s_accuracy_top_k[key] = s_accuracy_top_k.get(key, 0) + value
+
+        select_count_each_batch = torch.sum(masked_action_records, dim=1)
+        select_count = select_count + torch.sum(select_count_each_batch).data.cpu()
+
+        print(
+            'train_type: {} step {} sequence model loss: {}, policy model loss: {}, contain all error count: {}, select of each batch: {}, total of each batch: {}, total decoder_input_cout: {}, topk: {}, '.format(
+                train_type, step, s_loss, p_loss, contain_all_error_count, select_count_each_batch.data.tolist(), error_length.data.tolist(), one_decoder_input_count.data.item(), s_accuracy_top_k))
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         if train_type != 'p_model':
             p_model.zero_grad()
@@ -253,19 +276,22 @@ def combine_train(p_model, s_model, seq_model, dataset, batch_size, loss_fn, p_o
             seq_model.zero_grad()
 
         if train_type == 'p_model':
-            torch.nn.utils.clip_grad_norm_(p_model.parameters(), 100)
+            torch.nn.utils.clip_grad_norm_(p_model.parameters(), 0.5)
             p_loss.backward()
             p_optimizer.step()
         elif train_type == 's_model':
-            torch.nn.utils.clip_grad_norm_(s_model.parameters(), 100)
-            torch.nn.utils.clip_grad_norm_(seq_model.parameters(), 100)
+            torch.nn.utils.clip_grad_norm_(s_model.parameters(), 8)
+            torch.nn.utils.clip_grad_norm_(seq_model.parameters(), 8)
             s_loss.backward()
             s_optimizer.step()
 
-    return (total_seq_loss/select_count.float()).data.item(), (total_p_loss/seq_count.float()).data.item()
+    for key, value in total_s_accuracy_top_k.items():
+        total_s_accuracy_top_k[key] = total_s_accuracy_top_k.get(key, 0) / decoder_input_count.data.item()
+
+    return (total_seq_loss/decoder_input_count.float()).data.item(), (total_p_loss/seq_count.float()).data.item(), (select_count.float()/seq_count.float()).data.item(), total_s_accuracy_top_k
 
 
-def train_and_evaluate(data_type, batch_size, hidden_size, num_heads, encoder_stack_num, decoder_stack_num, structed_num_layers, addition_reward_gamma, baseline_min_len, dropout_p, learning_rate, epoches, saved_name, load_name=None, gcc_file_path='test.c', normalize_type='layer', predict_type='start', pretrain_s_model_epoch=0):
+def train_and_evaluate(data_type, batch_size, hidden_size, num_heads, encoder_stack_num, decoder_stack_num, structed_num_layers, addition_reward_gamma, baseline_min_len, length_punish_scale, dropout_p, learning_rate, epoches, saved_name, load_name=None, gcc_file_path='test.c', normalize_type='layer', predict_type='start', pretrain_s_model_epoch=0):
     save_path = os.path.join(config.save_model_root, saved_name)
     if load_name is not None:
         load_path = os.path.join(config.save_model_root, load_name)
@@ -290,7 +316,6 @@ def train_and_evaluate(data_type, batch_size, hidden_size, num_heads, encoder_st
     for d, n in zip(datasets, ["train", "val", "test"]):
         print("There are {} parsed data in the {} dataset".format(len(d), n))
     train_dataset, valid_dataset, test_dataset = datasets
-    print(train_dataset)
 
     seq_model = OnlyAttentionFixErrorModelWithoutInputEmbedding(vocabulary_size=vocabulary.vocabulary_size, hidden_size=2*hidden_size,
                                        sequence_max_length=MAX_LENGTH, num_heads=num_heads,
@@ -314,20 +339,23 @@ def train_and_evaluate(data_type, batch_size, hidden_size, num_heads, encoder_st
     best_s_valid_loss = None
     best_s_test_loss = None
 
-    delay_reward_fn = create_delayed_reward_fn(seq_loss_no_reduce, gamma=addition_reward_gamma)
-    baseline_fn = create_baseline_fn(baseline_min_len)
-    delay_loss_fn = create_delay_loss_fn()
+    remain_length_punish = create_remain_punish(length_punish_scale)
+    # delay_reward_fn = create_delayed_reward_fn(seq_loss_no_reduce, gamma=addition_reward_gamma, length_punish_fn=delete_length_punish)
+    delay_reward_fn = create_delayed_reward_fn(seq_loss_no_reduce, gamma=addition_reward_gamma, length_punish_fn=remain_length_punish)
+    # baseline_fn = create_baseline_fn(baseline_min_len)
+    baseline_fn = None
+    delay_loss_fn = create_delay_loss_fn(do_normalize=False)
 
     if load_name is not None:
-        torch_util.load_model(p_model, load_path+'_p')
-        torch_util.load_model(s_model, load_path+'_s')
-        torch_util.load_model(seq_model, load_path+'_seq')
-        best_s_valid_loss, best_p_valid_loss = combine_train(p_model, s_model, seq_model, valid_dataset, batch_size,
+        torch_util.load_model(p_model, load_path+'_p', map_location={'cuda:1':'cuda:0'})
+        torch_util.load_model(s_model, load_path+'_s', map_location={'cuda:1':'cuda:0'})
+        torch_util.load_model(seq_model, load_path+'_seq', map_location={'cuda:1':'cuda:0'})
+        best_s_valid_loss, best_p_valid_loss, valid_select_probs, valid_accuracy_topk = combine_train(p_model, s_model, seq_model, valid_dataset, batch_size,
                                                      loss_fn=seq_loss, p_optimizer=p_optimizer, s_optimizer=s_optimizer,
                                                      delay_reward_fn=delay_reward_fn, baseline_fn=baseline_fn,
                                                      delay_loss_fn=delay_loss_fn, vocab=vocabulary, train_type='valid',
                                                      predict_type='first', include_error_reward=-10000, pretrain=False)
-        best_s_test_loss, best_p_test_loss = combine_train(p_model, s_model, seq_model, test_dataset, batch_size,
+        best_s_test_loss, best_p_test_loss, test_select_probs, test_accuracy_topk = combine_train(p_model, s_model, seq_model, test_dataset, batch_size,
                                                    loss_fn=seq_loss, p_optimizer=p_optimizer, s_optimizer=s_optimizer,
                                                    delay_reward_fn=delay_reward_fn, baseline_fn=baseline_fn,
                                                    delay_loss_fn=delay_loss_fn, vocab=vocabulary, train_type='test',
@@ -336,7 +364,7 @@ def train_and_evaluate(data_type, batch_size, hidden_size, num_heads, encoder_st
     if pretrain_s_model_epoch > 0:
         for i in range(pretrain_s_model_epoch):
             print('in epoch: {}, train type: {}'.format(i, 'pre-train'))
-            pretrain_seq_loss, pretrain_p_loss = combine_train(p_model, s_model, seq_model, train_dataset, batch_size,
+            pretrain_seq_loss, pretrain_p_loss, pretrain_select_probs, pretrain_accuracy_topk = combine_train(p_model, s_model, seq_model, train_dataset, batch_size,
                                                          loss_fn=seq_loss, p_optimizer=p_optimizer, s_optimizer=s_optimizer,
                                                          delay_reward_fn=delay_reward_fn, baseline_fn=baseline_fn,
                                                          delay_loss_fn=delay_loss_fn, vocab=vocabulary,
@@ -345,28 +373,38 @@ def train_and_evaluate(data_type, batch_size, hidden_size, num_heads, encoder_st
             print('pretrain {}: seq_loss: {}, p_loss: {}'.format(str(i), pretrain_seq_loss, pretrain_p_loss))
 
     for epoch in range(epoches):
-        if int(epoch/2)%2 == 0:
+        if int(epoch/2) % 2 == 0:
+            train_type = 'p_model'
+        else:
             train_type = 's_model'
             # train_type = 'p_model'
-        else:
-            train_type = 'p_model'
         print('in epoch: {}, train type: {}'.format(epoch, train_type))
-        train_seq_loss, train_p_loss = combine_train(p_model, s_model, seq_model, train_dataset, batch_size,
+        train_seq_loss, train_p_loss, train_select_probs, train_accuracy_topk = combine_train(p_model, s_model, seq_model, train_dataset, batch_size,
                                                      loss_fn=seq_loss, p_optimizer=p_optimizer, s_optimizer=s_optimizer,
                                                      delay_reward_fn=delay_reward_fn, baseline_fn=baseline_fn,
                                                      delay_loss_fn=delay_loss_fn, vocab=vocabulary,
                                                      train_type=train_type, predict_type='first',
                                                      include_error_reward=-10000, pretrain=False)
-        valid_seq_loss, valid_p_loss = combine_train(p_model, s_model, seq_model, valid_dataset, batch_size,
-                                                     loss_fn=seq_loss, p_optimizer=p_optimizer, s_optimizer=s_optimizer,
-                                                     delay_reward_fn=delay_reward_fn, baseline_fn=baseline_fn,
-                                                     delay_loss_fn=delay_loss_fn, vocab=vocabulary, train_type='valid',
-                                                     predict_type='first', include_error_reward=-10000, pretrain=False)
-        test_seq_loss, test_p_loss = combine_train(p_model, s_model, seq_model, test_dataset, batch_size,
-                                                   loss_fn=seq_loss, p_optimizer=p_optimizer, s_optimizer=s_optimizer,
-                                                   delay_reward_fn=delay_reward_fn, baseline_fn=baseline_fn,
-                                                   delay_loss_fn=delay_loss_fn, vocab=vocabulary, train_type='test',
-                                                   predict_type='first', include_error_reward=-10000, pretrain=False)
+        if not is_debug:
+            valid_seq_loss, valid_p_loss, valid_select_probs, valid_accuracy_topk = combine_train(p_model, s_model, seq_model, valid_dataset, batch_size,
+                                                         loss_fn=seq_loss, p_optimizer=p_optimizer, s_optimizer=s_optimizer,
+                                                         delay_reward_fn=delay_reward_fn, baseline_fn=baseline_fn,
+                                                         delay_loss_fn=delay_loss_fn, vocab=vocabulary, train_type='valid',
+                                                         predict_type='first', include_error_reward=-10000, pretrain=False)
+            test_seq_loss, test_p_loss, test_select_probs, test_accuracy_topk = combine_train(p_model, s_model, seq_model, test_dataset, batch_size,
+                                                       loss_fn=seq_loss, p_optimizer=p_optimizer, s_optimizer=s_optimizer,
+                                                       delay_reward_fn=delay_reward_fn, baseline_fn=baseline_fn,
+                                                       delay_loss_fn=delay_loss_fn, vocab=vocabulary, train_type='test',
+                                                       predict_type='first', include_error_reward=-10000, pretrain=False)
+        else:
+            valid_seq_loss = 0
+            valid_p_loss = 0
+            valid_select_probs = 0
+            valid_accuracy_topk = {}
+            test_seq_loss = 0
+            test_p_loss = 0
+            test_select_probs = 0
+            test_accuracy_topk = {}
         # train_seq_loss = 0
         # train_p_loss = 0
         # valid_seq_loss = 0
@@ -384,28 +422,33 @@ def train_and_evaluate(data_type, batch_size, hidden_size, num_heads, encoder_st
             best_p_test_loss = test_p_loss
             best_s_valid_loss = valid_seq_loss
             best_s_test_loss = test_seq_loss
-            if not is_debug:
-                torch_util.save_model(p_model, save_path+'_p')
-                torch_util.save_model(s_model, save_path+'_s')
-                torch_util.save_model(seq_model, save_path+'_seq')
-        print('epoch {}: train_seq_loss: {}, train_p_loss: {}, valid_seq_loss: {}, valid_p_loss: {}, '
-              'test_seq_loss: {}, test_p_loss: {}'.format(epoch, train_seq_loss, train_p_loss, valid_seq_loss,
-                                                          valid_p_loss, test_seq_loss, test_p_loss))
+        if not is_debug:
+            cur_time = time.strftime("%Y%m%d%H%M%S", time.localtime())
+            torch_util.save_model(p_model, '{}_{}_{}_{}'.format(save_path, 'p', str(epoch), cur_time))
+            torch_util.save_model(s_model, '{}_{}_{}_{}'.format(save_path, 's', str(epoch), cur_time))
+            torch_util.save_model(seq_model, '{}_{}_{}_{}'.format(save_path, 'seq', str(epoch), cur_time))
+        print('epoch {}: train_seq_loss: {}, train_p_loss: {}, train_select_probs: {}, train_accuracy: {}, '
+              'valid_seq_loss: {}, valid_p_loss: {}, valid_select_probs: {}, valid_accuracy: {}, '
+              'test_seq_loss: {}, test_p_loss: {}, test_select_probs: {}, test_accuracy: {}'
+              .format(epoch, train_seq_loss, train_p_loss, train_select_probs, train_accuracy_topk,
+                      valid_seq_loss, valid_p_loss, valid_select_probs, valid_accuracy_topk,
+                      test_seq_loss, test_p_loss, test_select_probs, test_accuracy_topk))
     print('the model {} best valid_seq_loss: {}, best valid_p_loss: {}, '
           'best test_seq_loss: {}, best test_p_loss: {}'.format(saved_name, best_s_valid_loss, best_p_valid_loss,
                                                                 best_s_test_loss, best_p_test_loss))
 
 
 # --------------------------- two kinds of loss_fn ------------------------ #
-def create_delayed_reward_fn(loss_fn, gamma):
+def create_delayed_reward_fn(loss_fn, gamma, length_punish_fn):
 
-    def calculate_delayed_rewards(log_probs, target_token_tensor, total, remain):
+    def calculate_delayed_rewards(log_probs, target_token_tensor, total, remain, force_reward):
         """
 
         :param log_probs:
         :param target_token_tensor:
         :param total: [batch]
-        :param remain: [batch
+        :param remain: [batch]
+        :param force_reward : [batch]
         :return:
         """
         total = total.float()
@@ -414,8 +457,8 @@ def create_delayed_reward_fn(loss_fn, gamma):
         length = torch.sum(torch.ne(target_token_tensor, -1).view(batch_size, -1), dim=1)
         loss_full_shape = loss_fn(torch.transpose(log_probs, dim0=1, dim1=2), target_token_tensor)
         loss_batch = torch.sum(loss_full_shape.view(batch_size, -1), dim=1).float()/length.float()
-        addition_reward = (total-remain)/total * gamma
-        total_reward_batch = - loss_batch + addition_reward
+        length_punish_reward = length_punish_fn(total, remain) * gamma
+        total_reward_batch = - loss_batch + length_punish_reward + force_reward
         if math.isnan(total_reward_batch.view(-1).data[0]):
             print('is nan')
         return total_reward_batch
@@ -455,7 +498,7 @@ def create_baseline_fn(baseline_min_len):
     return step_mean_baseline
 
 
-def create_delay_loss_fn():
+def create_delay_loss_fn(do_normalize=True):
     def delay_loss_with_force_mask(action_log_probs, total_reward, error_mask, force_value):
         """
         :param action_log_probs: [batch, seq_len]
@@ -464,7 +507,10 @@ def create_delay_loss_fn():
         :param force_value: [batch, seq_len], add force value to final reward
         :return:
         """
-        norm_reward = normalize_rewards(total_reward, error_mask)
+        if do_normalize:
+            norm_reward = normalize_rewards(total_reward, error_mask)
+        else:
+            norm_reward = total_reward
         norm_reward = norm_reward + force_value
 
         # loss_position shape: [batch, seq_len]. make sure norm_reward.data.required_grad == False
@@ -485,6 +531,22 @@ def normalize_rewards(rewards, error_mask):
     norm_reward = (rewards - mean) / std
     return norm_reward
 
+
+def delete_length_punish(total, remain):
+    return (total-remain)/total
+
+
+def create_remain_punish(scale):
+    def remain_reward_fn(total, remain):
+        """
+        it will get the maximun reward when remain/total = sqrt(scale)
+        :param total:
+        :param remain:
+        :return:
+        """
+        reward = remain / total + scale * total / remain
+        return -reward
+    return remain_reward_fn
 
 
 # ---------------------------------------- model calculate util method ------------------------------------ #
@@ -584,10 +646,13 @@ def random_action_value_with_probs(batch_size, action_probs):
 
 if __name__ == '__main__':
 
-    train_and_evaluate('common_error', batch_size=8, hidden_size=128, num_heads=4, encoder_stack_num=3, decoder_stack_num=3,
-                           structed_num_layers=1, addition_reward_gamma=5, baseline_min_len=2, dropout_p=0.1, learning_rate=0.001,
-                           epoches=20, saved_name='test_structed_rl_model.pkl', load_name=None, gcc_file_path='test.c', normalize_type='layer',
-                           predict_type='first', pretrain_s_model_epoch=2)
+    train_and_evaluate('common_error', batch_size=8, hidden_size=128, num_heads=4, encoder_stack_num=5,
+                       decoder_stack_num=5,
+                       structed_num_layers=1, addition_reward_gamma=2, baseline_min_len=2, length_punish_scale=0.1,
+                       dropout_p=0.1, learning_rate=0.001,
+                       epoches=20, saved_name='test_structed_rl_model.pkl', load_name=None,
+                       gcc_file_path='test.c', normalize_type='layer',
+                       predict_type='first', pretrain_s_model_epoch=2)
 
 
 

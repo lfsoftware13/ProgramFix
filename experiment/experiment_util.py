@@ -14,6 +14,7 @@ import pandas as pd
 MAX_TOKEN_LENGTH = 500
 
 
+@disk_cache(basename='load_common_error_data', directory=CACHE_DATA_PATH)
 def load_common_error_data():
     vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>', addition_tokens=['<GAP>'])
     train, vaild, test = read_fake_common_c_error_dataset_with_limit_length(MAX_TOKEN_LENGTH)
