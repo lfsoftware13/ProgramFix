@@ -8,6 +8,7 @@ import typing
 from torch.nn.modules.rnn import RNNCellBase
 from torch.nn.utils.rnn import PackedSequence
 
+from common.args_util import to_cuda
 from common.util import transform_id_to_token
 
 
@@ -262,13 +263,25 @@ def spilt_heads(x, num_heads):
     return x
 
 
-def create_sequence_length_mask(token_length, max_len, gpu_index=None):
+def create_sequence_length_mask(token_length, max_len=None, gpu_index=None):
+    if max_len is None:
+        max_len = torch.max(token_length).item()
     idxes = torch.arange(0, max_len, out=torch.Tensor(max_len)).unsqueeze(0)  # some day, you'll be able to directly do this on cuda
     if gpu_index is not None:
         idxes = idxes.cuda(gpu_index)
+    else:
+        idxes = to_cuda(idxes)
     # mask = autograd.Variable((trans_to_cuda(idxes) < token_length.unsqueeze(1)).float())
     mask = (idxes < token_length.unsqueeze(1).float())
     return mask
+
+
+def permute_last_dim_to_second(log_probs):
+    permute_shape = [i for i in range(len(log_probs.shape))]
+    permute_shape.insert(1, permute_shape[-1])
+    permute_shape = permute_shape[:-1]
+    log_probs = log_probs.permute(*permute_shape)
+    return log_probs
 
 
 if __name__ == '__main__':

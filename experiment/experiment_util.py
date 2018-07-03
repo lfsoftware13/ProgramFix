@@ -38,11 +38,11 @@ def load_common_error_data():
     test = test.loc[test_data[0].index.values]
 
     train_dict = {'error_code_word_id': train_data[0], 'ac_code_word_id': train_data[1],
-                  'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'], }
+                  'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'], 'is_copy': train_data[4]}
     valid_dict = {'error_code_word_id': vaild_data[0], 'ac_code_word_id': vaild_data[1],
-                  'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'], }
+                  'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'], 'is_copy': vaild_data[4]}
     test_dict = {'error_code_word_id': test_data[0], 'ac_code_word_id': test_data[1], 'token_map': test_data[2],
-                 'error_mask': test_data[3], 'includes': test['includes'], }
+                 'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4]}
     # valid_dict = {'error_code_word_id': vaild_data, 'includes': vaild['includes']}
     # test_dict = {'error_code_word_id': test_data, 'includes': test['includes']}
 
@@ -81,11 +81,11 @@ def load_common_error_data_sample_100():
     test = test.loc[test_data[0].index.values]
 
     train_dict = {'error_code_word_id': train_data[0], 'ac_code_word_id': train_data[1],
-                  'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'], }
+                  'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'], 'is_copy': train_data[4]}
     valid_dict = {'error_code_word_id': vaild_data[0], 'ac_code_word_id': vaild_data[1],
-                  'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'], }
+                  'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'], 'is_copy': vaild_data[4]}
     test_dict = {'error_code_word_id': test_data[0], 'ac_code_word_id': test_data[1], 'token_map': test_data[2],
-                 'error_mask': test_data[3], 'includes': test['includes'], }
+                 'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4]}
     # valid_dict = {'error_code_word_id': vaild_data, 'includes': vaild['includes']}
     # test_dict = {'error_code_word_id': test_data, 'includes': test['includes']}
 

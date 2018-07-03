@@ -902,3 +902,29 @@ def build_code_string_from_lex_tokens(tokens):
 
     print(code_re)
     return code_re
+
+
+def iterate_directory(root_path, extensions=None, recursive=False):
+    """
+    iterate file in directory
+    :param root_path:
+    :param extensions:
+    :param recursive:
+    :return:
+    """
+
+    if not recursive:
+        for file in os.listdir(root_path):
+            file_name, extension_name = os.path.splitext(file)
+            if extensions is None\
+                    or ((isinstance(extensions, list) or isinstance(extensions, tuple)) and extension_name in extensions) \
+                    or (isinstance(extensions, str) and extensions == extension_name):
+                yield os.path.join(root_path, file), file
+    else:
+        for dir_path, dir_names, file_names in os.walk(root_path):
+            for file in file_names:
+                file_name, extension_name = os.path.splitext(file)
+                if extensions is None \
+                        or ((isinstance(extensions, list) or isinstance(extensions, tuple)) and extension_name in extensions) \
+                        or (isinstance(extensions, str) and extensions == extension_name):
+                    yield os.path.join(dir_path, file), file

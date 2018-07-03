@@ -257,7 +257,9 @@ def parse_error_tokens_and_action_map(df, data_type, keyword_vocab, sort_fn=None
     df = df[df['error_mask'].map(lambda x: x is not None)].copy()
     print('after error_mask id: ', len(df.index))
 
-    return df['error_code_word_id'], df['ac_code_word_id'], df['token_map'], df['error_mask']
+    df['is_copy'] = df.apply(create_is_copy_for_ac_tokens, raw=True, axis=1)
+
+    return df['error_code_word_id'], df['ac_code_word_id'], df['token_map'], df['error_mask'], df['is_copy']
 
 
 def create_token_id_input(one, keyword_voc):
@@ -418,6 +420,23 @@ def create_tokens_error_mask(tokens, action_list):
         return None
 
     return token_error_mask
+
+
+def create_is_copy_for_ac_tokens(one):
+    ac_code_obj = one['ac_code_obj']
+    action_token_list = json.loads(one['action_character_list'])
+
+    is_copy_label = [1 for i in range(len(ac_code_obj))]
+
+    for cur_action in action_token_list:
+        cur_token_pos = cur_action['token_pos']
+        cur_type = cur_action['act_type']
+
+        if cur_type == DELETE:
+            is_copy_label[cur_token_pos] = 0
+        elif cur_type == CHANGE:
+            is_copy_label[cur_token_pos] = 0
+    return is_copy_label
 
 
 def calculate_action_bias_from_iterative_to_static(action_list):
