@@ -284,5 +284,21 @@ def permute_last_dim_to_second(log_probs):
     return log_probs
 
 
+def expand_tensor_sequence_len(t, max_len, fill_value=0):
+    t_len = t.shape[1]
+    if max_len == t_len:
+        return t
+    expand_shape = list(t.shape)
+    expand_shape[1] = 1
+    one_t = to_cuda(torch.ones(*expand_shape).float()) * fill_value
+    expand_t = one_t.expand(-1, max_len - t_len, *[-1 for i in range(len(t.shape) - 2)])
+    if t.data.type() == 'torch.cuda.LongTensor' or t.data.type() == 'torch.LongTensor':
+        expand_t = expand_t.long()
+    elif t.data.type() == 'torch.cuda.ByteTensor' or t.data.type() == 'torch.ByteTensor':
+        expand_t = expand_t.byte()
+    res_t = torch.cat([t, expand_t], dim=1)
+    return res_t
+
+
 if __name__ == '__main__':
     a = []

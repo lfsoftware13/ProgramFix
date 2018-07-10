@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from common.args_util import to_cuda
+from common.logger import info
 
 
 def to_numpy(var):
@@ -15,12 +16,18 @@ def to_numpy(var):
 
 HAS_NAN = False
 def is_nan(var):
+    var = var.detach()
     if var is None:
         return "None"
-    res = np.isnan(np.sum(to_numpy(var)))
-    if res:
+    res = torch.isnan(torch.sum(var)).item()
+    if res == 1:
         global HAS_NAN
         HAS_NAN = True
+        res = True
+    # res = np.isnan(np.sum(to_numpy(var)))
+    # if res:
+    #     global HAS_NAN
+    #     HAS_NAN = True
     return res
 
 def show_tensor(var):
@@ -31,13 +38,24 @@ def show_tensor(var):
 
 def create_hook_fn(name):
     def p(v):
+        v = v.detach()
+        nan_result = is_nan(v)
+        info("{} gradient: is nan {}, max value: {}, min value: {}".format(name, nan_result, torch.max(v).item(), torch.min(v).item()))
+        # if nan_result:
+        #     print(v)
         # print("{} gradient: is nan {}".format(name, is_nan(v.detach())))
-        print("{} gradient: is nan {}".format(name, v.detach()))
+        # print("{} gradient: is nan {}".format(name, v.detach()))
     return p
 
 
 def register_hook(var, name):
     var.register_hook(create_hook_fn(name))
+
+
+def record_is_nan(var, name):
+    info('{}: {}'.format(name, str(is_nan(var))))
+    register_hook(var, name + ' in hook: ')
+    pass
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -74,22 +92,29 @@ class ScaledDotProductAttention(nn.Module):
         key_3d = key.contiguous().view(-1, key_shape[-1], key_shape[-2])
         qk_dotproduct = torch.bmm(query_3d, key_3d).view(*query_shape[:-2], query_shape[-2], key_shape[-2])
         scaled_qk_dotproduct = qk_dotproduct/scaled_value
+        # record_is_nan(scaled_qk_dotproduct, 'scaled_qk_dotproduct in ScaledDotProductAttention')
 
         # mask the padded token value
         if value_mask is not None:
             dim_len = len(list(scaled_qk_dotproduct.shape))
             # masked_fill = value_mask.view(value_shape[0], *[1 for i in range(dim_len-2)], value_shape[-2])
             # scaled_qk_dotproduct = torch.where(masked_fill, scaled_qk_dotproduct, to_cuda(torch.Tensor([float('-inf')])))
-            scaled_qk_dotproduct.masked_fill_(~value_mask.view(value_shape[0], *[1 for i in range(dim_len-2)], value_shape[-2]), -float('inf'))
+            scaled_qk_dotproduct.masked_fill_(~value_mask.view(value_mask.shape[0], *[1 for i in range(dim_len-2)], value_mask.shape[-1]), -float('inf'))
+        # value_mask_sum = torch.sum(value_mask, dim=-1)
+        # info(torch.eq(value_mask_sum, 0))
+        # info('value_mask batch sum: {}, equal 0 sum: {}'.format(value_mask_sum, torch.sum(torch.eq(value_mask_sum, 0))))
+        # record_is_nan(scaled_qk_dotproduct, 'scaled_qk_dotproduct after masked in ScaledDotProductAttention')
+
 
         weight_distribute = F.softmax(scaled_qk_dotproduct, dim=-1)
-        # register_hook(weight_distribute, 'weight_distribute')
-        # register_hook(scaled_qk_dotproduct, 'scaled_qk_dotproduct')
-        # register_hook(qk_dotproduct, 'qk_dotproduct')
+        # record_is_nan(weight_distribute, 'weight_distribute in ScaledDotProductAttention')
         weight_shape = list(weight_distribute.shape)
         attention_value = torch.bmm(weight_distribute.view(-1, *weight_shape[-2:]), value.contiguous().view(-1, *value_shape[-2:]))
+        # record_is_nan(attention_value, 'attention_value in ScaledDotProductAttention')
         attention_value = attention_value.view(*weight_shape[:-2], *list(attention_value.shape)[-2:])
+        # record_is_nan(attention_value, 'attention_value after view in ScaledDotProductAttention')
         transformed_output = self.transform_output(attention_value)
+        # record_is_nan(transformed_output, 'transformed_output in ScaledDotProductAttention')
         return transformed_output
 
 
@@ -116,10 +141,15 @@ class OneHeaderAttention(nn.Module):
         :param value:
         :return:
         """
+        # info('memory_mask in OneHeaderAttention: , batch mask: {}'.format(torch.sum(memory_mask, dim=-1)))
         query = self.query_linear(inputs)
         key = self.key_linear(memory)
         value = self.value_linear(memory)
+        # record_is_nan(query, 'query in OneHeaderAttention')
+        # record_is_nan(key, 'key in OneHeaderAttention')
+        # record_is_nan(value, 'value in OneHeaderAttention')
         atte_value = self.attention.forward(query, key, value, value_mask=memory_mask)
+        # record_is_nan(atte_value, 'atte_value in OneHeaderAttention')
         return atte_value
 
 
@@ -143,11 +173,18 @@ class TrueMaskedMultiHeaderAttention(nn.Module):
         :param value:
         :return:
         """
+        # record_is_nan(inputs, 'inputs in TrueMaskedMultiHeaderAttention')
+        # record_is_nan(memory, 'memory in TrueMaskedMultiHeaderAttention')
+        # info('memory_mask in TrueMaskedMultiHeaderAttention: , batch mask: {}'.format(torch.sum(memory_mask, dim=-1)))
         atte_value_list = [m(inputs, memory, memory_mask) for m in self.header_attention_list]
+        # for i, atte_value in enumerate(atte_value_list):
+        #     record_is_nan(atte_value, 'atte_value in TrueMaskedMultiHeaderAttention' + str(i))
 
         atte_value = torch.cat(atte_value_list, dim=-1)
+        # record_is_nan(atte_value, 'atte_value after concat in TrueMaskedMultiHeaderAttention')
 
         output_value = self.output_linear(atte_value)
+        # record_is_nan(output_value, 'output_value in TrueMaskedMultiHeaderAttention')
         return output_value
 
 
@@ -192,6 +229,7 @@ class SelfAttentionEncoder(nn.Module):
 
         self.dropout = nn.Dropout(dropout_p)
 
+        self.relu = nn.ReLU()
         self.self_attention = TrueMaskedMultiHeaderAttention(hidden_size, num_heads)
         self.ff = PositionWiseFeedForwardNet(hidden_size, hidden_size, hidden_size, hidden_layer_count=1)
         if normalize_type == 'layer':
@@ -199,13 +237,22 @@ class SelfAttentionEncoder(nn.Module):
             self.ff_normalize = nn.LayerNorm(normalized_shape=hidden_size)
 
     def forward(self, input, input_mask):
+        # record_is_nan(input, 'input in SelfAttentionEncoder')
         atte_value = self.dropout(self.self_attention.forward(input, input, memory_mask=input_mask))
+        # record_is_nan(atte_value, 'atte_value in SelfAttentionEncoder')
         if self.normalize_type is not None:
             atte_value = self.self_attention_normalize(atte_value) + atte_value
+            atte_value = self.relu(atte_value)
+            # record_is_nan(atte_value, 'atte_value after normalize in SelfAttentionEncoder')
 
         ff_value = self.dropout(self.ff.forward(atte_value))
+        info('ff_value max value: {}, min value: {}'.format(torch.max(ff_value), torch.min(ff_value)))
+        # record_is_nan(ff_value, 'ff_value in SelfAttentionEncoder')
         if self.normalize_type is not None:
             ff_value = self.ff_normalize(ff_value) + ff_value
+            ff_value = self.relu(ff_value)
+            # info('ff_value after normalize max value: {}, min value: {}'.format(torch.max(ff_value), torch.min(ff_value)))
+            # record_is_nan(ff_value, 'ff_value after normalize in SelfAttentionEncoder')
         return ff_value
 
 
@@ -222,9 +269,14 @@ class TransformEncoderModel(nn.Module):
 
     def forward(self, embedded_input, input_mask):
         # encoder for n times
+        # info('input_mask in TransformEncoderModel: , batch mask: {}'.format(torch.sum(input_mask, dim=-1)))
         encode_value = embedded_input
+        # record_is_nan(encode_value, 'encode_value_0 in TransformEncoderModel')
+        # count = 1
         for encoder in self.encoder_list:
             encode_value = encoder(encode_value, input_mask)
+            # record_is_nan(encode_value, 'encode_value_'+str(count)+' in TransformEncoderModel')
+            # count += 1
         return encode_value
 
 
@@ -239,6 +291,7 @@ class SelfAttentionDecoder(nn.Module):
 
         self.dropout = nn.Dropout(dropout_p)
 
+        self.relu = nn.ReLU()
         self.input_self_attention = TrueMaskedMultiHeaderAttention(hidden_size, num_heads)
         self.attention = TrueMaskedMultiHeaderAttention(hidden_size, num_heads)
         self.ff = PositionWiseFeedForwardNet(hidden_size, hidden_size, hidden_size, hidden_layer_count=1)
@@ -251,15 +304,18 @@ class SelfAttentionDecoder(nn.Module):
     def forward(self, input, input_mask, encoder_output, encoder_mask):
         self_atte_value = self.dropout(self.input_self_attention(input, input, input_mask))
         if self.normalize_type is not None:
-            self_atte_value = self.self_attention_normalize(self_atte_value)
+            self_atte_value = self.self_attention_normalize(self_atte_value) + self_atte_value
+            self_atte_value = self.relu(self_atte_value)
 
         atte_value = self.dropout(self.attention(self_atte_value, encoder_output, encoder_mask))
         if self.normalize_type is not None:
-            atte_value = self.attention_normalize(atte_value)
+            atte_value = self.attention_normalize(atte_value) + atte_value
+            # atte_value = self.relu(atte_value)
 
         ff_value = self.dropout(self.ff(atte_value))
         if self.normalize_type is not None:
-            ff_value = self.ff_normalize(ff_value)
+            ff_value = self.ff_normalize(ff_value) + ff_value
+            # ff_value = self.relu(ff_value)
 
         return ff_value
 

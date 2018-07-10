@@ -6,22 +6,26 @@ import math
 import torch.nn.functional as F
 import pandas as pd
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 import config
 from common import torch_util
-from common.args_util import to_cuda
-from common.torch_util import create_sequence_length_mask, permute_last_dim_to_second
+from common.args_util import to_cuda, get_model
+from common.logger import init_a_file_logger, info
+from common.opt import OpenAIAdam
+from common.torch_util import create_sequence_length_mask, permute_last_dim_to_second, expand_tensor_sequence_len
 from common.util import data_loader, show_process_map, PaddedList
 from experiment.experiment_util import load_common_error_data, load_common_error_data_sample_100
 from model.base_attention import TransformEncoderModel, TransformDecoderModel, TrueMaskedMultiHeaderAttention, \
-    register_hook, PositionWiseFeedForwardNet
+    register_hook, PositionWiseFeedForwardNet, is_nan, record_is_nan
 from read_data.load_data_vocabulary import create_common_error_vocabulary
+from seq2seq.models import EncoderRNN, DecoderRNN
 from vocabulary.word_vocabulary import Vocabulary
 
 
 MAX_LENGTH = 500
 IGNORE_TOKEN = -1
-is_debug = True
+is_debug = False
 
 class CCodeErrorDataSet(Dataset):
     def __init__(self,
@@ -55,12 +59,12 @@ class CCodeErrorDataSet(Dataset):
         if self.set_type != 'valid' or self.set_type != 'test':
             begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[0])
             end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[0])
-            sample['ac_tokens'] = self.data_df.iloc[index]['ac_code_word_id'] + [end_id]
+            sample['ac_tokens'] = [begin_id] + self.data_df.iloc[index]['ac_code_word_id'] + [end_id]
             sample['ac_length'] = len(sample['ac_tokens'])
             sample['token_map'] = self.data_df.iloc[index]['token_map']
             sample['pointer_map'] = create_pointer_map(sample['ac_length'], sample['token_map'])
             sample['error_mask'] = self.data_df.iloc[index]['error_mask']
-            sample['is_copy'] = self.data_df.iloc[index]['is_copy'] + [0]
+            sample['is_copy'] = [0] + self.data_df.iloc[index]['is_copy'] + [0]
         else:
             sample['ac_tokens'] = None
             sample['ac_length'] = 0
@@ -78,10 +82,16 @@ class CCodeErrorDataSet(Dataset):
 
 
 def create_pointer_map(ac_length, token_map):
+    """
+    the ac length includes begin and end label.
+    :param ac_length:
+    :param token_map:
+    :return: map ac id to error pointer position with begin and end
+    """
     pointer_map = [-1 for i in range(ac_length)]
     for error_i, ac_i in enumerate(token_map):
         if ac_i >= 0:
-            pointer_map[ac_i] = error_i
+            pointer_map[ac_i + 1] = error_i
     last_point = -1
     for i in range(len(pointer_map)):
         if pointer_map[i] == -1:
@@ -137,13 +147,34 @@ class SinCosPositionEmbeddingModel(nn.Module):
 
 
 class IndexPositionEmbedding(nn.Module):
-    def __init__(self, hidden_size, max_len):
+    def __init__(self, vocabulary_size, hidden_size, max_len):
         super(IndexPositionEmbedding, self).__init__()
-        self.embedding = nn.Embedding(max_len, hidden_size)
+        self.hidden_size = hidden_size
+        self.max_len = max_len
+        self.position_embedding = nn.Embedding(max_len, hidden_size)
+        self.embedding = nn.Embedding(vocabulary_size, hidden_size)
 
-    def forward(self, input_index):
-        embedded_index = self.embedding(input_index)
-        return embedded_index
+    def forward(self, inputs, input_mask=None, start_index=0):
+        batch_size = inputs.shape[0]
+        input_sequence_len = inputs.shape[1]
+        embedded_input = self.embedding(inputs)
+        position_input_index = to_cuda(
+            torch.unsqueeze(torch.arange(start_index, start_index + input_sequence_len), dim=0).expand(batch_size, -1)).long()
+        if input_mask is not None:
+            position_input_index = position_input_index.masked_fill_(~input_mask, MAX_LENGTH)
+        position_input_embedded = self.position_embedding(position_input_index)
+        position_input = torch.cat([position_input_embedded, embedded_input], dim=-1)
+        return position_input
+
+    def forward_position(self, inputs, input_mask=None):
+        batch_size = inputs.shape[0]
+        input_sequence_len = inputs.shape[1]
+        position_input_index = to_cuda(
+            torch.unsqueeze(torch.arange(0, input_sequence_len), dim=0).expand(batch_size, -1)).long()
+        if input_mask is not None:
+            position_input_index = position_input_index.masked_fill_(~input_mask, MAX_LENGTH)
+        position_input_embedded = self.position_embedding(position_input_index)
+        return position_input_embedded
 
 
 class SelfAttentionPointerNetworkModel(nn.Module):
@@ -160,22 +191,26 @@ class SelfAttentionPointerNetworkModel(nn.Module):
         self.normalize_type = normalize_type
         self.MAX_LENGTH = MAX_LENGTH
 
-        self.encode_embedding = nn.Embedding(vocabulary_size, hidden_size)
-        self.encode_position_embedding = SinCosPositionEmbeddingModel()
-        # self.encode_position_embedding = IndexPositionEmbedding(self.hidden_size/2, MAX_LENGTH)
-        self.decode_embedding = nn.Embedding(vocabulary_size, hidden_size)
-        self.decode_position_embedding = SinCosPositionEmbeddingModel()
-        # self.decode_position_embedding = IndexPositionEmbedding(self.hidden_size/2, MAX_LENGTH)
+        # self.encode_embedding = nn.Embedding(vocabulary_size, hidden_size//2)
+        # self.encode_position_embedding = SinCosPositionEmbeddingModel()
+        self.encode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
+        # self.decode_embedding = nn.Embedding(vocabulary_size, hidden_size//2)
+        # self.decode_position_embedding = SinCosPositionEmbeddingModel()
+        self.decode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
 
         self.encoder = TransformEncoderModel(hidden_size=self.hidden_size, encoder_stack_num=self.encoder_stack_num, dropout_p=self.dropout_p, num_heads=self.num_heads, normalize_type=self.normalize_type)
         self.decoder = TransformDecoderModel(hidden_size=hidden_size, decoder_stack_num=self.decoder_stack_num, dropout_p=self.dropout_p, num_heads=self.num_heads, normalize_type=self.normalize_type)
 
-        self.copy_linear = nn.Linear(self.hidden_size, 1)
+        # self.copy_linear = nn.Linear(self.hidden_size, 1)
+        self.copy_linear = PositionWiseFeedForwardNet(input_size=self.hidden_size, hidden_size=self.hidden_size,
+                                                      output_size=1, hidden_layer_count=1)
 
         # self.position_pointer = TrueMaskedMultiHeaderAttention(hidden_size=self.hidden_size, num_heads=1, attention_type='scaled_dot_product')
         # self.position_pointer = nn.Linear(self.hidden_size, self.hidden_size)
-        self.position_pointer = PositionWiseFeedForwardNet(self.hidden_size, self.hidden_size, self.hidden_size, 1)
-        self.output_linear = nn.Linear(self.hidden_size, self.vocabulary_size)
+        self.position_pointer = PositionWiseFeedForwardNet(self.hidden_size, self.hidden_size, self.hidden_size//2, 1)
+        # self.output_linear = nn.Linear(self.hidden_size, self.vocabulary_size)
+        self.output_linear = PositionWiseFeedForwardNet(input_size=self.hidden_size, hidden_size=self.hidden_size,
+                                                      output_size=vocabulary_size, hidden_layer_count=1)
 
     def create_next_output(self, copy_output, value_output, pointer_output, input):
         """
@@ -193,55 +228,145 @@ class SelfAttentionPointerNetworkModel(nn.Module):
         next_output = torch.where(is_copy, point_id, top_id.squeeze(dim=-1))
         return next_output
 
-    def decode_step(self, decode_input, decode_mask, encode_value, encode_mask):
+    def decode_step(self, decode_input, decode_mask, encode_value, encode_mask, position_embedded):
+        # record_is_nan(encode_value, 'encode_value')
         decoder_output = self.decoder(decode_input, decode_mask, encode_value, encode_mask)
+        # record_is_nan(decoder_output, 'decoder_output')
+
         is_copy = F.sigmoid(self.copy_linear(decoder_output).squeeze(dim=-1))
+        # record_is_nan(is_copy, 'is_copy in model: ')
         pointer_ff = self.position_pointer(decoder_output)
-        pointer_output = torch.bmm(pointer_ff, torch.transpose(encode_value, dim0=-1, dim1=-2))
+        # record_is_nan(pointer_ff, 'pointer_ff in model: ')
+        pointer_output = torch.bmm(pointer_ff, torch.transpose(position_embedded, dim0=-1, dim1=-2))
+        # record_is_nan(pointer_output, 'pointer_output in model: ')
         if encode_mask is not None:
-            dim_len = len(encode_mask.shape)
-            pointer_output.masked_fill_(~encode_mask.view(encode_mask.shape[0], *[1 for i in range(dim_len-1)], encode_mask.shape[-1]), -float('inf'))
+            dim_len = len(pointer_output.shape)
+            pointer_output.masked_fill_(~encode_mask.view(encode_mask.shape[0], *[1 for i in range(dim_len-2)], encode_mask.shape[-1]), -float('inf'))
             # pointer_output = torch.where(torch.unsqueeze(encode_mask, dim=1), pointer_output, to_cuda(torch.Tensor([float('-inf')])))
+
         value_output = self.output_linear(decoder_output)
         return is_copy, value_output, pointer_output
 
-    def forward(self, input, input_length, output, output_length):
-        embedded_input = self.encode_embedding(input)
-        position_input = self.encode_position_embedding(embedded_input)
-        input_mask = create_sequence_length_mask(input_length)
-
+    def forward(self, input, input_mask, output, output_mask):
+        position_input = self.encode_position_embedding(input, input_mask)
+        position_input_embedded = self.encode_position_embedding.forward_position(input, input_mask)
         encode_value = self.encoder(position_input, input_mask)
 
-        embedded_output = self.decode_embedding(output)
-        position_output = self.decode_position_embedding(embedded_output)
-        output_mask = create_sequence_length_mask(output_length)
-
-        is_copy, value_output, pointer_output = self.decode_step(position_output, output_mask, encode_value, input_mask)
+        position_output = self.decode_position_embedding(output, output_mask)
+        is_copy, value_output, pointer_output = self.decode_step(position_output, output_mask, encode_value, input_mask,
+                                                                 position_embedded=position_input_embedded)
         return is_copy, value_output, pointer_output
 
-    def forward_test(self, input, input_length):
-        embedded_input = self.encode_embedding(input)
-        position_input = self.encode_position_embedding(embedded_input)
-        input_mask = create_sequence_length_mask(input_length)
-        encode_value = self.encoder(position_input, input_mask)
+class RNNPointerNetworkModel(nn.Module):
+    def __init__(self, vocabulary_size, hidden_size, num_layers, start_label, end_label, dropout_p=0.1, MAX_LENGTH=500):
+        super(RNNPointerNetworkModel, self).__init__()
+        self.vocabulary_size = vocabulary_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.start_label = start_label
+        self.end_label = end_label
+        self.dropout_p = dropout_p
+        self.MAX_LENGTH = MAX_LENGTH
+
+        self.encode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
+        self.decode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
+
+        self.encoder = EncoderRNN(vocab_size=vocabulary_size, max_len=MAX_LENGTH, input_size=self.hidden_size, hidden_size=self.hidden_size//2,
+                                  n_layers=num_layers, bidirectional=True, rnn_cell='lstm',
+                                  input_dropout_p=self.dropout_p, dropout_p=self.dropout_p, variable_lengths=False,
+                                  embedding=None, update_embedding=True)
+        self.decoder = DecoderRNN(vocab_size=vocabulary_size, max_len=MAX_LENGTH, hidden_size=hidden_size,
+                                  sos_id=start_label, eos_id=end_label, n_layers=num_layers, rnn_cell='lstm',
+                                  bidirectional=False, input_dropout_p=self.dropout_p, dropout_p=self.dropout_p,
+                                  use_attention=True)
+
+        self.copy_linear = PositionWiseFeedForwardNet(input_size=self.hidden_size, hidden_size=self.hidden_size,
+                                                      output_size=1, hidden_layer_count=1)
+
+        # self.position_pointer = TrueMaskedMultiHeaderAttention(hidden_size=self.hidden_size, num_heads=1, attention_type='scaled_dot_product')
+        # self.position_pointer = nn.Linear(self.hidden_size, self.hidden_size)
+        self.position_pointer = PositionWiseFeedForwardNet(self.hidden_size, self.hidden_size, self.hidden_size//2, 1)
+        # self.output_linear = nn.Linear(self.hidden_size, self.vocabulary_size)
+        self.output_linear = PositionWiseFeedForwardNet(input_size=self.hidden_size, hidden_size=self.hidden_size,
+                                                      output_size=vocabulary_size, hidden_layer_count=1)
+
+    def create_next_output(self, copy_output, value_output, pointer_output, input):
+        """
+
+        :param copy_output: [batch, sequence, dim**]
+        :param value_output: [batch, sequence, dim**, vocabulary_size]
+        :param pointer_output: [batch, sequence, dim**, encode_length]
+        :param input: [batch, encode_length, dim**]
+        :return: [batch, sequence, dim**]
+        """
+        is_copy = (copy_output > 0.5)
+        _, top_id = torch.topk(F.softmax(value_output, dim=-1), k=1, dim=-1)
+        _, pointer_pos_in_input = torch.topk(F.softmax(pointer_output, dim=-1), k=1, dim=-1)
+        point_id = torch.gather(input, dim=-1, index=pointer_pos_in_input.squeeze(dim=-1))
+        next_output = torch.where(is_copy, point_id, top_id.squeeze(dim=-1))
+        return next_output
+
+    def decode_step(self, decode_input, encoder_hidden, decode_mask, encode_value, encode_mask, position_embedded, teacher_forcing_ratio=1):
+        # record_is_nan(encode_value, 'encode_value')
+        decoder_output, hidden, _ = self.decoder(inputs=decode_input, encoder_hidden=encoder_hidden, encoder_outputs=encode_value,
+                                            encoder_mask=~encode_mask, teacher_forcing_ratio=teacher_forcing_ratio)
+        decoder_output = torch.stack(decoder_output, dim=1)
+        # record_is_nan(decoder_output, 'decoder_output')
+        if decode_mask is not None:
+            decode_mask = decode_mask[:, 1:] if teacher_forcing_ratio == 1 else decode_mask
+            decoder_output = decoder_output * decode_mask.view(decode_mask.shape[0], decode_mask.shape[1], *[1 for i in range(len(decoder_output.shape)-2)]).float()
+
+        is_copy = F.sigmoid(self.copy_linear(decoder_output).squeeze(dim=-1))
+        # record_is_nan(is_copy, 'is_copy in model: ')
+        pointer_ff = self.position_pointer(decoder_output)
+        # record_is_nan(pointer_ff, 'pointer_ff in model: ')
+        pointer_output = torch.bmm(pointer_ff, torch.transpose(position_embedded, dim0=-1, dim1=-2))
+        # record_is_nan(pointer_output, 'pointer_output in model: ')
+        if encode_mask is not None:
+            dim_len = len(pointer_output.shape)
+            pointer_output.masked_fill_(~encode_mask.view(encode_mask.shape[0], *[1 for i in range(dim_len-2)], encode_mask.shape[-1]), -float('inf'))
+            # pointer_output = torch.where(torch.unsqueeze(encode_mask, dim=1), pointer_output, to_cuda(torch.Tensor([float('-inf')])))
+
+        value_output = self.output_linear(decoder_output)
+        return is_copy, value_output, pointer_output, hidden
+
+    def forward(self, inputs, input_mask, output, output_mask, test=False):
+        if test:
+            return self.forward_test(inputs, input_mask)
+        position_input = self.encode_position_embedding(inputs, input_mask)
+        position_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
+        encode_value, hidden = self.encoder(position_input)
+        encoder_hidden = [hid.view(self.num_layers, hid.shape[1], -1) for hid in hidden]
+
+        position_output = self.decode_position_embedding(inputs=output, input_mask=output_mask)
+        is_copy, value_output, pointer_output, _ = self.decode_step(decode_input=position_output, encoder_hidden=encoder_hidden,
+                                                                 decode_mask=output_mask, encode_value=encode_value,
+                                                                 position_embedded=position_input_embedded,
+                                                                 encode_mask=input_mask, teacher_forcing_ratio=1)
+        return is_copy, value_output, pointer_output
+
+    def forward_test(self, input, input_mask):
+        position_input = self.encode_position_embedding(input, input_mask)
+        position_input_embedded = self.encode_position_embedding.forward_position(input, input_mask)
+        encode_value, hidden = self.encoder(position_input)
+        hidden = [hid.view(self.num_layers, hid.shape[1], -1) for hid in hidden]
 
         batch_size = list(input.shape)[0]
-        continue_mask = torch.Tensor([1 for i in range(batch_size)]).byte()
-        outputs = torch.LongTensor([[self.start_label] for i in range(batch_size)])
+        continue_mask = to_cuda(torch.Tensor([1 for i in range(batch_size)])).byte()
+        outputs = to_cuda(torch.LongTensor([[self.start_label] for i in range(batch_size)]))
         is_copy_stack = []
         value_output_stack = []
         pointer_stack = []
         output_stack = []
 
         for i in range(self.MAX_LENGTH):
-            output_embed = self.decode_embedding(outputs)
+            cur_input_mask = continue_mask.view(continue_mask.shape[0], 1)
+            output_embed = self.decode_position_embedding(inputs=outputs, input_mask=cur_input_mask, start_index=i)
 
-            # deal position encode
-            dim_num = len(output_embed.shape) - 2
-            position_start_list = [i for t in range(dim_num)]
-            positioned_output = self.encode_position_embedding(output_embed, position_start_list=position_start_list)
-
-            is_copy, value_output, pointer_output = self.decode_step(positioned_output, decode_mask=None, encode_value=encode_value, encode_mask=input_mask)
+            is_copy, value_output, pointer_output, hidden = self.decode_step(decode_input=output_embed, encoder_hidden=hidden,
+                                                                 decode_mask=cur_input_mask, encode_value=encode_value,
+                                                                 position_embedded=position_input_embedded,
+                                                                 encode_mask=input_mask, teacher_forcing_ratio=0)
             is_copy_stack.append(is_copy)
             value_output_stack.append(value_output)
             pointer_stack.append(pointer_output)
@@ -249,8 +374,8 @@ class SelfAttentionPointerNetworkModel(nn.Module):
             outputs = self.create_next_output(is_copy, value_output, pointer_output, input)
             output_stack.append(outputs)
 
-            cur_continue = torch.ne(outputs, self.end_label)
-            continue_mask = continue_mask & ~cur_continue
+            cur_continue = torch.ne(outputs, self.end_label).view(outputs.shape[0])
+            continue_mask = continue_mask & cur_continue
 
             if torch.sum(continue_mask) == 0:
                 break
@@ -264,35 +389,98 @@ class SelfAttentionPointerNetworkModel(nn.Module):
 
 def parse_input_batch_data(batch_data):
     error_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['error_tokens'])))
-    error_length = to_cuda(torch.LongTensor(batch_data['error_length']))
-    ac_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['ac_tokens'])))
-    ac_length = to_cuda(torch.LongTensor(batch_data['ac_length']))
-    return error_tokens, error_length, ac_tokens, ac_length
+    max_input = max(batch_data['error_length'])
+    input_mask = to_cuda(create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['error_length'])), max_len=max_input))
+
+    ac_tokens_decoder_input = [bat[:-1] for bat in batch_data['ac_tokens']]
+    ac_tokens = to_cuda(torch.LongTensor(PaddedList(ac_tokens_decoder_input)))
+    ac_tokens_length = [len(bat) for bat in ac_tokens_decoder_input]
+    max_output = max(ac_tokens_length)
+    output_mask = to_cuda(create_sequence_length_mask(to_cuda(torch.LongTensor(ac_tokens_length)), max_len=max_output))
+
+    # info('error_tokens shape: {}, input_mask shape: {}, ac_tokens shape: {}, output_mask shape: {}'.format(
+    #     error_tokens.shape, input_mask.shape, ac_tokens.shape, output_mask.shape))
+    # info('error_length: {}'.format(batch_data['error_length']))
+    # info('ac_length: {}'.format(batch_data['ac_length']))
+
+    return error_tokens, input_mask, ac_tokens, output_mask
 
 
-def create_combine_loss_fn():
+def parse_rnn_input_batch_data(batch_data):
+    error_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['error_tokens'])))
+    max_input = max(batch_data['error_length'])
+    input_mask = to_cuda(create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['error_length'])), max_len=max_input))
+
+    # ac_tokens_decoder_input = [bat[:-1] for bat in batch_data['ac_tokens']]
+    ac_tokens_decoder_input = batch_data['ac_tokens']
+    ac_tokens = to_cuda(torch.LongTensor(PaddedList(ac_tokens_decoder_input)))
+    ac_tokens_length = [len(bat) for bat in ac_tokens_decoder_input]
+    max_output = max(ac_tokens_length)
+    output_mask = to_cuda(create_sequence_length_mask(to_cuda(torch.LongTensor(ac_tokens_length)), max_len=max_output))
+
+    # info('error_tokens shape: {}, input_mask shape: {}, ac_tokens shape: {}, output_mask shape: {}'.format(
+    #     error_tokens.shape, input_mask.shape, ac_tokens.shape, output_mask.shape))
+    # info('error_length: {}'.format(batch_data['error_length']))
+    # info('ac_length: {}'.format(batch_data['ac_length']))
+
+    return error_tokens, input_mask, ac_tokens, output_mask
+
+
+def parse_target_batch_data(batch_data):
+    ac_tokens_decoder_output = [bat[1:] for bat in batch_data['ac_tokens']]
+    target_ac_tokens = to_cuda(torch.LongTensor(PaddedList(ac_tokens_decoder_output, fill_value=IGNORE_TOKEN)))
+
+    ac_tokens_length = [len(bat) for bat in ac_tokens_decoder_output]
+    max_output = max(ac_tokens_length)
+    output_mask = to_cuda(create_sequence_length_mask(to_cuda(torch.LongTensor(ac_tokens_length)), max_len=max_output))
+
+    pointer_map = [bat[1:] for bat in batch_data['pointer_map']]
+    target_pointer_output = to_cuda(torch.LongTensor(PaddedList(pointer_map, fill_value=IGNORE_TOKEN)))
+
+    is_copy = [bat[1:] for bat in batch_data['is_copy']]
+    target_is_copy = to_cuda(torch.Tensor(PaddedList(is_copy)))
+
+    return target_is_copy, target_pointer_output, target_ac_tokens, output_mask
+
+def create_combine_loss_fn(copy_weight=1, pointer_weight=1, value_weight=1, average_value=True):
     copy_loss_fn = nn.BCELoss(reduce=False)
     pointer_loss_fn = nn.CrossEntropyLoss(ignore_index=IGNORE_TOKEN, reduce=False)
     value_loss_fn = nn.CrossEntropyLoss(ignore_index=IGNORE_TOKEN, reduce=False)
 
-    def combine_total_loss(is_copy, target_copy, pointer_log_probs, target_pointer, value_log_probs, target_value, output_mask):
+    def combine_total_loss(is_copy, pointer_log_probs, value_log_probs, target_copy, target_pointer, target_value, output_mask):
+        # record_is_nan(is_copy, 'is_copy: ')
+        # record_is_nan(pointer_log_probs, 'pointer_log_probs: ')
+        # record_is_nan(value_log_probs, 'value_log_probs: ')
         output_mask_float = output_mask.float()
+        # info('output_mask_float: {}, mask batch: {}'.format(str(output_mask_float), torch.sum(output_mask_float, dim=-1)))
+        # info('target_copy: {}, mask batch: {}'.format(str(target_copy), torch.sum(target_copy, dim=-1)))
 
         copy_loss = copy_loss_fn(is_copy, target_copy)
+        # record_is_nan(copy_loss, 'copy_loss: ')
         copy_loss = copy_loss * output_mask_float
+        # record_is_nan(copy_loss, 'copy_loss with mask: ')
 
         pointer_log_probs = permute_last_dim_to_second(pointer_log_probs)
         pointer_loss = pointer_loss_fn(pointer_log_probs, target_pointer)
+        # record_is_nan(pointer_loss, 'pointer_loss: ')
         pointer_loss = pointer_loss * output_mask_float
+        # record_is_nan(pointer_loss, 'pointer_loss with mask: ')
 
         value_log_probs = permute_last_dim_to_second(value_log_probs)
         value_loss = value_loss_fn(value_log_probs, target_value)
-        value_loss = value_loss * output_mask_float * (~target_copy.byte()).float()
+        # record_is_nan(value_loss, 'value_loss: ')
+        value_mask_float = output_mask_float * (~target_copy.byte()).float()
+        # info('value_mask_float: {}, mask batch: {}'.format(str(value_mask_float), torch.sum(value_mask_float, dim=-1)))
+        value_loss = value_loss * value_mask_float
+        # record_is_nan(value_loss, 'value_loss with mask: ')
+        total_count = torch.sum(output_mask_float)
+        if average_value:
+            value_count = torch.sum(value_mask_float)
+            value_loss = value_loss / value_count * total_count
 
-        # total_loss = copy_loss + pointer_loss + value_loss
-        total_loss = pointer_loss
-        # register_hook(total_loss, 'total loss')
-        return total_loss
+        total_loss = copy_weight*copy_loss + pointer_weight*pointer_loss + value_weight*value_loss
+        # total_loss = pointer_weight*pointer_loss
+        return torch.sum(total_loss) / total_count
     return combine_total_loss
 
 
@@ -321,88 +509,147 @@ def train(model, dataset, batch_size, loss_function, optimizer, clip_norm, epoch
     total_accuracy = to_cuda(torch.Tensor([0]))
     model.train()
 
-    for batch_data in data_loader(dataset, batch_size=batch_size, is_shuffle=False, drop_last=True, epoch_ratio=epoch_ratio):
-        model.zero_grad()
-        target_ac_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['ac_tokens'])))
-        target_pointer_output = to_cuda(torch.LongTensor(PaddedList(batch_data['pointer_map'])))
-        target_is_copy = to_cuda(torch.Tensor(PaddedList(batch_data['is_copy'])))
-        output_mask = create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['ac_length'])))
-
-        model_input = parse_input_batch_data(batch_data)
-        is_copy, value_output, pointer_output = model.forward(*model_input)
-        loss = loss_function(is_copy, target_is_copy, pointer_output, target_pointer_output, value_output, target_ac_tokens, output_mask)
-
-        if steps == 0:
-            pointer_probs = F.softmax(pointer_output, dim=-1)
-            print('pointer output softmax: ', pointer_probs)
-            print('pointer output: ', torch.squeeze(torch.topk(pointer_probs, k=1, dim=-1)[1], dim=-1))
-            print('target_pointer_output: ', target_pointer_output)
-
-        batch_loss = torch.sum(loss)
-        batch_count = torch.sum(output_mask).float()
-        loss = batch_loss / batch_count
-
-        # if clip_norm is not None:
-        #     torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
-        loss.backward()
-        optimizer.step()
-
-        output_ids = create_output_ids(is_copy, value_output, pointer_output, model_input[0])
-        batch_accuracy = torch.sum(torch.eq(output_ids, target_ac_tokens) & output_mask).float()
-        accuracy = batch_accuracy / batch_count
-        total_accuracy += batch_accuracy
-        total_loss += batch_loss
-        print('in train step {}  loss: {}, accracy: {}'.format(steps, loss.data.item(), accuracy.data.item()))
-
-        count += batch_count
-        steps += 1
-
-    return total_loss/count, total_accuracy/count
-
-
-def evaluate(model, dataset, batch_size, loss_function):
-    total_loss = to_cuda(torch.Tensor([0]))
-    count = to_cuda(torch.Tensor([0]))
-    steps = 0
-    total_accuracy = to_cuda(torch.Tensor([0]))
-    model.eval()
-
-    with torch.no_grad():
-        for batch_data in data_loader(dataset, batch_size=batch_size, drop_last=True):
+    with tqdm(total=(len(dataset)*epoch_ratio)) as pbar:
+        for batch_data in data_loader(dataset, batch_size=batch_size, is_shuffle=True, drop_last=True, epoch_ratio=epoch_ratio):
             model.zero_grad()
-            target_ac_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['ac_tokens'])))
-            target_pointer_output = to_cuda(torch.LongTensor(PaddedList(batch_data['pointer_map'])))
-            target_is_copy = to_cuda(torch.Tensor(PaddedList(batch_data['is_copy'])))
-            output_mask = create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['ac_length'])))
+            # target_ac_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['ac_tokens'])))
+            # target_pointer_output = to_cuda(torch.LongTensor(PaddedList(batch_data['pointer_map'], fill_value=IGNORE_TOKEN)))
+            # target_is_copy = to_cuda(torch.Tensor(PaddedList(batch_data['is_copy'])))
+            # max_output = max(batch_data['ac_length'])
 
-            model_input = parse_input_batch_data(batch_data)
+            # model_input = parse_input_batch_data(batch_data)
+            model_input = parse_rnn_input_batch_data(batch_data)
             is_copy, value_output, pointer_output = model.forward(*model_input)
-            loss = loss_function(is_copy, target_is_copy, pointer_output, target_pointer_output, value_output,
-                                 target_ac_tokens, output_mask)
+            if steps % 100 == 0:
+                pointer_output_id = torch.squeeze(torch.topk(F.softmax(pointer_output, dim=-1), k=1, dim=-1)[1], dim=-1)
+                info(pointer_output_id)
+                # print(pointer_output_id)
 
-            batch_loss = torch.sum(loss)
+            model_target = parse_target_batch_data(batch_data)
+            target_is_copy, target_pointer_output, target_ac_tokens, output_mask = model_target
+            loss = loss_function(is_copy, pointer_output, value_output, *model_target)
+            # record_is_nan(loss, 'total loss in train:')
+
+
+            # if steps == 0:
+            #     pointer_probs = F.softmax(pointer_output, dim=-1)
+                # print('pointer output softmax: ', pointer_probs)
+                # print('pointer output: ', torch.squeeze(torch.topk(pointer_probs, k=1, dim=-1)[1], dim=-1))
+                # print('target_pointer_output: ', target_pointer_output)
+
             batch_count = torch.sum(output_mask).float()
-            loss = batch_loss / batch_count
+            batch_loss = loss * batch_count
+            # loss = batch_loss / batch_count
+
+            # if clip_norm is not None:
+            #     torch.nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
+            loss.backward()
+            optimizer.step()
 
             output_ids = create_output_ids(is_copy, value_output, pointer_output, model_input[0])
             batch_accuracy = torch.sum(torch.eq(output_ids, target_ac_tokens) & output_mask).float()
             accuracy = batch_accuracy / batch_count
             total_accuracy += batch_accuracy
             total_loss += batch_loss
-            print('in evaluate step {}  loss: {}, accracy: {}'.format(steps, loss.data.item(), accuracy.data.item()))
+
+            step_output = 'in train step {}  loss: {}, accracy: {}'.format(steps, loss.data.item(), accuracy.data.item())
+            # print(step_output)
+            info(step_output)
 
             count += batch_count
             steps += 1
+            pbar.update(batch_size)
+
+    return (total_loss/count).item(), (total_accuracy/count).item()
+
+
+def evaluate(model, dataset, batch_size, loss_function, do_sample=False):
+    total_loss = to_cuda(torch.Tensor([0]))
+    count = to_cuda(torch.Tensor([0]))
+    steps = 0
+    total_accuracy = to_cuda(torch.Tensor([0]))
+    model.eval()
+
+    with tqdm(total=len(dataset)) as pbar:
+        with torch.no_grad():
+            for batch_data in data_loader(dataset, batch_size=batch_size, drop_last=True):
+                model.zero_grad()
+                # target_ac_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['ac_tokens'])))
+                # target_pointer_output = to_cuda(torch.LongTensor(PaddedList(batch_data['pointer_map'])))
+                # target_is_copy = to_cuda(torch.Tensor(PaddedList(batch_data['is_copy'])))
+                # max_output = max(batch_data['ac_length'])
+                # output_mask = create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['ac_length'])),
+                #                                           max_len=max_output)
+
+
+                # model_input = parse_input_batch_data(batch_data)
+                model_input = parse_rnn_input_batch_data(batch_data)
+                model_target = parse_target_batch_data(batch_data)
+                target_is_copy, target_pointer_output, target_ac_tokens, output_mask = model_target
+                # is_copy, value_output, pointer_output = model.forward(*model_input)
+                if do_sample:
+                    _, is_copy, value_output, pointer_output = model.forward(*model_input[:2], None, None, test=True)
+                    predict_len = is_copy.shape[1]
+                    target_len = target_is_copy.shape[1]
+                    expand_len = max(predict_len, target_len)
+                    is_copy = expand_tensor_sequence_len(is_copy, max_len=expand_len, fill_value=0)
+                    value_output = expand_tensor_sequence_len(value_output, max_len=expand_len, fill_value=0)
+                    pointer_output = expand_tensor_sequence_len(pointer_output, max_len=expand_len, fill_value=0)
+                    target_is_copy = expand_tensor_sequence_len(target_is_copy, max_len=expand_len, fill_value=0)
+                    target_pointer_output = expand_tensor_sequence_len(target_pointer_output, max_len=expand_len, fill_value=IGNORE_TOKEN)
+                    target_ac_tokens = expand_tensor_sequence_len(target_ac_tokens, max_len=expand_len, fill_value=IGNORE_TOKEN)
+                    output_mask = expand_tensor_sequence_len(output_mask, max_len=expand_len, fill_value=0)
+                else:
+                    is_copy, value_output, pointer_output = model.forward(*model_input)
+
+
+                loss = loss_function(is_copy, pointer_output, value_output, target_is_copy, target_pointer_output,
+                                     target_ac_tokens, output_mask)
+                # if steps == 0:
+                #     pointer_probs = F.softmax(pointer_output, dim=-1)
+                    # print('pointer output softmax: ', pointer_probs)
+                    # print('pointer output: ', torch.squeeze(torch.topk(pointer_probs, k=1, dim=-1)[1], dim=-1))
+                    # print('target_pointer_output: ', target_pointer_output)
+
+                batch_count = torch.sum(output_mask).float()
+                batch_loss = loss * batch_count
+                # loss = batch_loss / batch_count
+
+                output_ids = create_output_ids(is_copy, value_output, pointer_output, model_input[0])
+                batch_accuracy = torch.sum(torch.eq(output_ids, target_ac_tokens) & output_mask).float()
+                accuracy = batch_accuracy / batch_count
+                total_accuracy += batch_accuracy
+                total_loss += batch_loss
+
+                step_output = 'in evaluate step {}  loss: {}, accracy: {}'.format(steps, loss.data.item(), accuracy.data.item())
+                # print(step_output)
+                info(step_output)
+
+                count += batch_count
+                steps += 1
+                pbar.update(batch_size)
 
         # output_result, is_copy, value_output, pointer_output = model.forward_test(*parse_test_batch_data(batch_data))
 
-    return total_loss / count, total_accuracy / count
+    return (total_loss / count).item(), (total_accuracy / count).item()
 
 
-def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, decoder_stack_num, dropout_p, learning_rate, epoches, saved_name, load_name=None, normalize_type='layer', clip_norm=80):
+def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, decoder_stack_num, num_layers, dropout_p, learning_rate, epoches, saved_name, load_name=None, epoch_ratio=1.0, normalize_type='layer', clip_norm=80, parallel=False, logger_file_path=None):
+    valid_loss = 0
+    test_loss = 0
+    valid_accuracy = 0
+    test_accuracy = 0
+    sample_valid_loss = 0
+    sample_test_loss = 0
+    sample_valid_accuracy = 0
+    sample_test_accuracy = 0
+
     save_path = os.path.join(config.save_model_root, saved_name)
     if load_name is not None:
         load_path = os.path.join(config.save_model_root, load_name)
+
+    if logger_file_path is not None:
+        init_a_file_logger(logger_file_path)
 
     begin_tokens = ['<BEGIN>']
     end_tokens = ['<END>']
@@ -422,41 +669,84 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
     datasets = [CCodeErrorDataSet(pd.DataFrame(dd), vocabulary, name) for dd, name in
                 zip(data_dict, ["train", "all_valid", "all_test"])]
     for d, n in zip(datasets, ["train", "val", "test"]):
-        print("There are {} parsed data in the {} dataset".format(len(d), n))
+        info_output = "There are {} parsed data in the {} dataset".format(len(d), n)
+        print(info_output)
+        # info(info_output)
+
     train_dataset, valid_dataset, test_dataset = datasets
 
-    model = SelfAttentionPointerNetworkModel(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
-                                     encoder_stack_num=encoder_stack_num, decoder_stack_num=decoder_stack_num,
-                                     start_label=begin_tokens_id[0], end_label=end_tokens_id[0], dropout_p=dropout_p,
-                                     num_heads=num_heads, normalize_type=normalize_type, MAX_LENGTH=MAX_LENGTH)
+    # model = SelfAttentionPointerNetworkModel(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
+    #                                  encoder_stack_num=encoder_stack_num, decoder_stack_num=decoder_stack_num,
+    #                                  start_label=begin_tokens_id[0], end_label=end_tokens_id[0], dropout_p=dropout_p,
+    #                                  num_heads=num_heads, normalize_type=normalize_type, MAX_LENGTH=MAX_LENGTH)
+    model = RNNPointerNetworkModel(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
+                                     num_layers=num_layers, start_label=begin_tokens_id[0], end_label=end_tokens_id[0],
+                                   dropout_p=dropout_p, MAX_LENGTH=MAX_LENGTH)
+
+    model = get_model(model)
+
     if load_name is not None:
-        torch_util.load_model(model, load_path)
+        torch_util.load_model(model, load_path, map_location={'cuda:1': 'cuda:0'})
 
-    loss_fn = create_combine_loss_fn()
-    optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
+    loss_fn = create_combine_loss_fn(average_value=True)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+    optimizer = OpenAIAdam(model.parameters(), lr=learning_rate, schedule='warmup_linear', warmup=0.002, t_total=epoches * len(train_dataset)//batch_size, max_grad_norm=clip_norm)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
 
-    model = to_cuda(model)
+    if load_name is not None:
+        valid_loss, valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                              loss_function=loss_fn)
+        test_loss, test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+                                            loss_function=loss_fn)
+        sample_valid_loss, sample_valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                              loss_function=loss_fn, do_sample=True)
+        sample_test_loss, sample_test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+                                            loss_function=loss_fn, do_sample=True)
+        evaluate_output = 'evaluate: valid loss of {}, test loss of {}, ' \
+                          'valid_accuracy result of {}, test_accuracy result of {}' \
+                          'sample valid loss: {}, sample test loss: {}, ' \
+                          'sample valid accuracy: {}, sample test accuracy: {}'.format(
+            valid_loss, test_loss, valid_accuracy, test_accuracy,
+            sample_valid_loss, sample_test_loss, sample_valid_accuracy, sample_test_accuracy)
+        print(evaluate_output)
+        info(evaluate_output)
+        pass
 
     for epoch in range(epoches):
-        train_loss, train_accuracy = train(model=model, dataset=train_dataset, batch_size=batch_size, loss_function=loss_fn, optimizer=optimizer,
-                               clip_norm=clip_norm, epoch_ratio=1)
-        # valid_loss, valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size, loss_function=loss_fn)
-        # test_loss, test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size, loss_function=loss_fn)
-        scheduler.step(train_loss)
-        print('epoch {}: train loss: {}, accuracy: {}'.format(epoch, train_loss, train_accuracy))
-        # print('epoch {}: train loss of {}, valid loss of {}, test loss of {}, train_accuracy result of {} '
-        #       'valid_accuracy result of {}, test_accuracy result of {}'.format(epoch, train_loss, valid_loss,
-        #                                                                        test_loss, train_accuracy,
-        #                                                                        valid_accuracy, test_accuracy))
+        train_loss, train_accuracy = train(model=model, dataset=train_dataset, batch_size=batch_size,
+                                           loss_function=loss_fn, optimizer=optimizer, clip_norm=clip_norm,
+                                           epoch_ratio=epoch_ratio)
+        valid_loss, valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                              loss_function=loss_fn)
+        test_loss, test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+                                            loss_function=loss_fn)
+        sample_valid_loss, sample_valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                              loss_function=loss_fn, do_sample=True)
+        sample_test_loss, sample_test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+                                            loss_function=loss_fn, do_sample=True)
+        # scheduler.step(train_loss)
+        # print('epoch {}: train loss: {}, accuracy: {}'.format(epoch, train_loss, train_accuracy))
+        epoch_output = 'epoch {}: train loss of {}, valid loss of {}, test loss of {}, ' \
+                       'train_accuracy result of {} valid_accuracy result of {}, test_accuracy result of {}' \
+                       'sample valid loss: {}, sample test loss: {}, ' \
+                       'sample valid accuracy: {}, sample test accuracy: {}'.format(
+            epoch, train_loss, valid_loss, test_loss, train_accuracy, valid_accuracy, test_accuracy,
+            sample_valid_loss, sample_test_loss, sample_valid_accuracy, sample_test_accuracy)
+        print(epoch_output)
+        info(epoch_output)
+
         if not is_debug:
             torch_util.save_model(model, save_path+str(epoch))
 
 
 if __name__ == '__main__':
-    train_and_evaluate(batch_size=2, hidden_size=200, num_heads=1, encoder_stack_num=1, decoder_stack_num=1, dropout_p=0,
-                       learning_rate=0.01, epoches=120, saved_name='SelfAttentionPointer.pkl', load_name=None,
-                       normalize_type='layer', clip_norm=80)
+    # train_and_evaluate(batch_size=12, hidden_size=400, num_heads=3, encoder_stack_num=4, decoder_stack_num=4, num_layers=3, dropout_p=0,
+    #                    learning_rate=6.25e-5, epoches=40, saved_name='SelfAttentionPointer.pkl', load_name='SelfAttentionPointer.pkl',
+    #                    epoch_ratio=0.25, normalize_type=None, clip_norm=1, parallel=False, logger_file_path='log/SelfAttentionPointer.log')
+
+    train_and_evaluate(batch_size=16, hidden_size=400, num_heads=0, encoder_stack_num=0, decoder_stack_num=0, num_layers=3, dropout_p=0,
+                       learning_rate=6.25e-5, epoches=40, saved_name='RNNPointerAllLoss.pkl', load_name=None,
+                       epoch_ratio=0.25, normalize_type=None, clip_norm=1, parallel=False, logger_file_path='log/RNNPointerAllLoss.log')
 
 
 
