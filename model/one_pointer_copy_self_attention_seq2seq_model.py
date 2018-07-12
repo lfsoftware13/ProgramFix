@@ -14,7 +14,7 @@ from common.args_util import to_cuda, get_model
 from common.logger import init_a_file_logger, info
 from common.opt import OpenAIAdam
 from common.torch_util import create_sequence_length_mask, permute_last_dim_to_second, expand_tensor_sequence_len
-from common.util import data_loader, show_process_map, PaddedList
+from common.util import data_loader, show_process_map, PaddedList, convert_one_token_ids_to_code
 from experiment.experiment_util import load_common_error_data, load_common_error_data_sample_100
 from model.base_attention import TransformEncoderModel, TransformDecoderModel, TrueMaskedMultiHeaderAttention, \
     register_hook, PositionWiseFeedForwardNet, is_nan, record_is_nan
@@ -176,6 +176,9 @@ class IndexPositionEmbedding(nn.Module):
         position_input_embedded = self.position_embedding(position_input_index)
         return position_input_embedded
 
+    def forward_content(self, inputs, input_mask=None):
+        embedded_input = self.embedding(inputs)
+        return embedded_input
 
 class SelfAttentionPointerNetworkModel(nn.Module):
     def __init__(self, vocabulary_size, hidden_size, encoder_stack_num, decoder_stack_num, start_label, end_label, dropout_p=0.1, num_heads=2, normalize_type=None, MAX_LENGTH=500):
@@ -258,7 +261,7 @@ class SelfAttentionPointerNetworkModel(nn.Module):
         return is_copy, value_output, pointer_output
 
 class RNNPointerNetworkModel(nn.Module):
-    def __init__(self, vocabulary_size, hidden_size, num_layers, start_label, end_label, dropout_p=0.1, MAX_LENGTH=500):
+    def __init__(self, vocabulary_size, hidden_size, num_layers, start_label, end_label, dropout_p=0.1, MAX_LENGTH=500, atte_position_type='position'):
         super(RNNPointerNetworkModel, self).__init__()
         self.vocabulary_size = vocabulary_size
         self.hidden_size = hidden_size
@@ -267,6 +270,7 @@ class RNNPointerNetworkModel(nn.Module):
         self.end_label = end_label
         self.dropout_p = dropout_p
         self.MAX_LENGTH = MAX_LENGTH
+        self.atte_position_type = atte_position_type
 
         self.encode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
         self.decode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
@@ -334,20 +338,30 @@ class RNNPointerNetworkModel(nn.Module):
         if test:
             return self.forward_test(inputs, input_mask)
         position_input = self.encode_position_embedding(inputs, input_mask)
-        position_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
+        if self.atte_position_type == 'position':
+            encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
+        elif self.atte_position_type == 'content':
+            encoder_atte_input_embedded = self.encode_position_embedding.forward_content(inputs, input_mask)
+        else:
+            encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
         encode_value, hidden = self.encoder(position_input)
         encoder_hidden = [hid.view(self.num_layers, hid.shape[1], -1) for hid in hidden]
 
         position_output = self.decode_position_embedding(inputs=output, input_mask=output_mask)
         is_copy, value_output, pointer_output, _ = self.decode_step(decode_input=position_output, encoder_hidden=encoder_hidden,
                                                                  decode_mask=output_mask, encode_value=encode_value,
-                                                                 position_embedded=position_input_embedded,
+                                                                 position_embedded=encoder_atte_input_embedded,
                                                                  encode_mask=input_mask, teacher_forcing_ratio=1)
         return is_copy, value_output, pointer_output
 
     def forward_test(self, input, input_mask):
         position_input = self.encode_position_embedding(input, input_mask)
-        position_input_embedded = self.encode_position_embedding.forward_position(input, input_mask)
+        if self.atte_position_type == 'position':
+            encoder_atte_input_embedded = self.encode_position_embedding.forward_position(input, input_mask)
+        elif self.atte_position_type == 'content':
+            encoder_atte_input_embedded = self.encode_position_embedding.forward_content(input, input_mask)
+        else:
+            encoder_atte_input_embedded = self.encode_position_embedding.forward_position(input, input_mask)
         encode_value, hidden = self.encoder(position_input)
         hidden = [hid.view(self.num_layers, hid.shape[1], -1) for hid in hidden]
 
@@ -365,7 +379,7 @@ class RNNPointerNetworkModel(nn.Module):
 
             is_copy, value_output, pointer_output, hidden = self.decode_step(decode_input=output_embed, encoder_hidden=hidden,
                                                                  decode_mask=cur_input_mask, encode_value=encode_value,
-                                                                 position_embedded=position_input_embedded,
+                                                                 position_embedded=encoder_atte_input_embedded,
                                                                  encode_mask=input_mask, teacher_forcing_ratio=0)
             is_copy_stack.append(is_copy)
             value_output_stack.append(value_output)
@@ -563,12 +577,17 @@ def train(model, dataset, batch_size, loss_function, optimizer, clip_norm, epoch
     return (total_loss/count).item(), (total_accuracy/count).item()
 
 
-def evaluate(model, dataset, batch_size, loss_function, do_sample=False):
+def evaluate(model, dataset, batch_size, loss_function, vocab, do_sample=False, print_output=False):
     total_loss = to_cuda(torch.Tensor([0]))
     count = to_cuda(torch.Tensor([0]))
+    total_batch = to_cuda(torch.Tensor([0]))
     steps = 0
     total_accuracy = to_cuda(torch.Tensor([0]))
+    total_correct = to_cuda(torch.Tensor([0]))
     model.eval()
+    start_id = vocab.word_to_id(vocab.begin_tokens[0])
+    end_id = vocab.word_to_id(vocab.end_tokens[0])
+    unk_id = vocab.word_to_id(vocab.unk)
 
     with tqdm(total=len(dataset)) as pbar:
         with torch.no_grad():
@@ -617,13 +636,66 @@ def evaluate(model, dataset, batch_size, loss_function, do_sample=False):
 
                 output_ids = create_output_ids(is_copy, value_output, pointer_output, model_input[0])
                 batch_accuracy = torch.sum(torch.eq(output_ids, target_ac_tokens) & output_mask).float()
+                batch_correct = torch.sum(
+                    torch.eq(torch.sum(torch.ne(output_ids, target_ac_tokens) & output_mask, dim=-1), 0)).float()
+                correct = batch_correct / batch_size
                 accuracy = batch_accuracy / batch_count
                 total_accuracy += batch_accuracy
+                total_correct += batch_correct
                 total_loss += batch_loss
+                total_batch += batch_size
 
-                step_output = 'in evaluate step {}  loss: {}, accracy: {}'.format(steps, loss.data.item(), accuracy.data.item())
+                step_output = 'in evaluate step {}  loss: {}, accracy: {}, correct: {}'.format(steps, loss.data.item(), accuracy.data.item(), correct.data.item())
                 # print(step_output)
                 info(step_output)
+
+                if print_output and steps % 10 == 0:
+                    output_ids = output_ids.tolist()
+                    target_ids = batch_data['ac_tokens']
+                    is_copy = (is_copy > 0.5).tolist()
+                    target_is_copy = target_is_copy.tolist()
+                    value_output = torch.squeeze(torch.topk(F.softmax(value_output, dim=-1), k=1, dim=-1)[1], dim=-1)
+                    value_output = value_output.tolist()
+                    target_ac_tokens = target_ac_tokens.tolist()
+                    pointer_output = torch.squeeze(torch.topk(F.softmax(pointer_output, dim=-1), k=1, dim=-1)[1], dim=-1)
+                    pointer_output = pointer_output.tolist()
+                    target_pointer_output = target_pointer_output.tolist()
+                    target_length = torch.sum(output_mask, dim=-1)
+                    target_length = target_length.tolist()
+                    for out, tar, cop, tar_cop, val, tar_val, poi, tar_poi, tar_len in zip(output_ids, target_ids, is_copy,
+                                                                                  target_is_copy, value_output,
+                                                                                  target_ac_tokens,
+                                                                                  pointer_output,
+                                                                                  target_pointer_output, target_length):
+                    # for out, tar,  in zip(output_ids, target_ids):
+                        out_code = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word, start=start_id,
+                                                             end=end_id, unk=unk_id)
+                        tar_code = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word, start=start_id,
+                                                             end=end_id, unk=unk_id)
+                        info('-------------- step {} ------------------------'.format(steps))
+                        info('output: {}'.format(out_code))
+                        info('target: {}'.format(tar_code))
+                        cop = [str(c) for c in cop]
+                        tar_cop = [str(int(c)) for c in tar_cop]
+                        poi = [str(c) for c in poi]
+                        tar_poi = [str(c) for c in tar_poi]
+                        info('copy output: {}'.format(' '.join(cop[:tar_len])))
+                        info('copy target: {}'.format(' '.join(tar_cop[:tar_len])))
+                        info('pointer output: {}'.format(' '.join(poi[:tar_len])))
+                        info('pointer target: {}'.format(' '.join(tar_poi[:tar_len])))
+
+                        value_list = []
+                        target_list = []
+                        for c, v, t in zip(tar_cop, val, tar_val):
+                            if c == '1':
+                                value_list += ['<COPY>']
+                                target_list += ['<COPY>']
+                            else:
+                                value_list += [vocab.id_to_word(int(v))]
+                                target_list += [vocab.id_to_word(int(t))]
+                        info('value output: {}'.format(' '.join(value_list[:tar_len])))
+                        info('value target: {}'.format(' '.join(target_list[:tar_len])))
+
 
                 count += batch_count
                 steps += 1
@@ -631,18 +703,22 @@ def evaluate(model, dataset, batch_size, loss_function, do_sample=False):
 
         # output_result, is_copy, value_output, pointer_output = model.forward_test(*parse_test_batch_data(batch_data))
 
-    return (total_loss / count).item(), (total_accuracy / count).item()
+    return (total_loss / count).item(), (total_accuracy / count).item(), (total_correct/total_batch).item()
 
 
-def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, decoder_stack_num, num_layers, dropout_p, learning_rate, epoches, saved_name, load_name=None, epoch_ratio=1.0, normalize_type='layer', clip_norm=80, parallel=False, logger_file_path=None):
+def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, decoder_stack_num, num_layers, dropout_p, learning_rate, epoches, saved_name, load_name=None, epoch_ratio=1.0, normalize_type='layer', atte_position_type='position', clip_norm=80, parallel=False, logger_file_path=None, do_sample_evaluate=False, print_output=False):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
     test_accuracy = 0
+    valid_correct = 0
+    test_correct = 0
     sample_valid_loss = 0
     sample_test_loss = 0
     sample_valid_accuracy = 0
     sample_test_accuracy = 0
+    sample_valid_correct = 0
+    sample_test_correct = 0
 
     save_path = os.path.join(config.save_model_root, saved_name)
     if load_name is not None:
@@ -681,7 +757,8 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
     #                                  num_heads=num_heads, normalize_type=normalize_type, MAX_LENGTH=MAX_LENGTH)
     model = RNNPointerNetworkModel(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
                                      num_layers=num_layers, start_label=begin_tokens_id[0], end_label=end_tokens_id[0],
-                                   dropout_p=dropout_p, MAX_LENGTH=MAX_LENGTH)
+                                   dropout_p=dropout_p, MAX_LENGTH=MAX_LENGTH, atte_position_type=atte_position_type)
+    print('model atte_position_type: {}'.format(atte_position_type))
 
     model = get_model(model)
 
@@ -694,20 +771,23 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
 
     if load_name is not None:
-        valid_loss, valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
-                                              loss_function=loss_fn)
-        test_loss, test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
-                                            loss_function=loss_fn)
-        sample_valid_loss, sample_valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
-                                              loss_function=loss_fn, do_sample=True)
-        sample_test_loss, sample_test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
-                                            loss_function=loss_fn, do_sample=True)
+        valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                              loss_function=loss_fn, vocab=vocabulary)
+        test_loss, test_accuracy, test_correct = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+                                            loss_function=loss_fn, vocab=vocabulary)
+        if do_sample_evaluate:
+            sample_valid_loss, sample_valid_accuracy, sample_valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                                  loss_function=loss_fn, do_sample=True, vocab=vocabulary, print_output=print_output)
+            sample_test_loss, sample_test_accuracy, sample_test_correct = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+                                                loss_function=loss_fn, do_sample=True, vocab=vocabulary, print_output=print_output)
         evaluate_output = 'evaluate: valid loss of {}, test loss of {}, ' \
                           'valid_accuracy result of {}, test_accuracy result of {}' \
+                          'valid correct result of {}, test correct result of {}' \
                           'sample valid loss: {}, sample test loss: {}, ' \
-                          'sample valid accuracy: {}, sample test accuracy: {}'.format(
-            valid_loss, test_loss, valid_accuracy, test_accuracy,
-            sample_valid_loss, sample_test_loss, sample_valid_accuracy, sample_test_accuracy)
+                          'sample valid accuracy: {}, sample test accuracy: {}' \
+                          'sample valid correct: {}, sample test correct: {}'.format(
+            valid_loss, test_loss, valid_accuracy, test_accuracy, valid_correct, test_correct,
+            sample_valid_loss, sample_test_loss, sample_valid_accuracy, sample_test_accuracy, sample_valid_correct, sample_test_correct)
         print(evaluate_output)
         info(evaluate_output)
         pass
@@ -716,22 +796,25 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
         train_loss, train_accuracy = train(model=model, dataset=train_dataset, batch_size=batch_size,
                                            loss_function=loss_fn, optimizer=optimizer, clip_norm=clip_norm,
                                            epoch_ratio=epoch_ratio)
-        valid_loss, valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
-                                              loss_function=loss_fn)
-        test_loss, test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
-                                            loss_function=loss_fn)
-        sample_valid_loss, sample_valid_accuracy = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
-                                              loss_function=loss_fn, do_sample=True)
-        sample_test_loss, sample_test_accuracy = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
-                                            loss_function=loss_fn, do_sample=True)
+        valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                              loss_function=loss_fn, vocab=vocabulary)
+        test_loss, test_accuracy, test_correct = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+                                            loss_function=loss_fn, vocab=vocabulary)
+        if do_sample_evaluate:
+            sample_valid_loss, sample_valid_accuracy, sample_valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                                  loss_function=loss_fn, do_sample=True, vocab=vocabulary)
+            sample_test_loss, sample_test_accuracy, sample_test_correct = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+                                                loss_function=loss_fn, do_sample=True, vocab=vocabulary)
         # scheduler.step(train_loss)
         # print('epoch {}: train loss: {}, accuracy: {}'.format(epoch, train_loss, train_accuracy))
         epoch_output = 'epoch {}: train loss of {}, valid loss of {}, test loss of {}, ' \
                        'train_accuracy result of {} valid_accuracy result of {}, test_accuracy result of {}' \
+                       'valid correct result of {}, test correct result of {}' \
                        'sample valid loss: {}, sample test loss: {}, ' \
-                       'sample valid accuracy: {}, sample test accuracy: {}'.format(
-            epoch, train_loss, valid_loss, test_loss, train_accuracy, valid_accuracy, test_accuracy,
-            sample_valid_loss, sample_test_loss, sample_valid_accuracy, sample_test_accuracy)
+                       'sample valid accuracy: {}, sample test accuracy: {}' \
+                       'sample valid correct: {}, sample test correct: {}'.format(
+            epoch, train_loss, valid_loss, test_loss, train_accuracy, valid_accuracy, test_accuracy, valid_correct, test_correct,
+            sample_valid_loss, sample_test_loss, sample_valid_accuracy, sample_test_accuracy, sample_valid_correct, sample_test_correct)
         print(epoch_output)
         info(epoch_output)
 
@@ -744,9 +827,15 @@ if __name__ == '__main__':
     #                    learning_rate=6.25e-5, epoches=40, saved_name='SelfAttentionPointer.pkl', load_name='SelfAttentionPointer.pkl',
     #                    epoch_ratio=0.25, normalize_type=None, clip_norm=1, parallel=False, logger_file_path='log/SelfAttentionPointer.log')
 
+    # train_and_evaluate(batch_size=16, hidden_size=400, num_heads=0, encoder_stack_num=0, decoder_stack_num=0, num_layers=3, dropout_p=0,
+    #                    learning_rate=6.25e-5, epoches=40, saved_name='RNNPointerAllLoss.pkl', load_name='RNNPointerAllLoss.pkl',
+    #                    epoch_ratio=0.25, normalize_type=None, atte_position_type='position', clip_norm=1, parallel=False,
+    #                    do_sample_evaluate=True, print_output=True, logger_file_path='log/RNNPointerAllLossRecords.log')
+
     train_and_evaluate(batch_size=16, hidden_size=400, num_heads=0, encoder_stack_num=0, decoder_stack_num=0, num_layers=3, dropout_p=0,
-                       learning_rate=6.25e-5, epoches=40, saved_name='RNNPointerAllLoss.pkl', load_name=None,
-                       epoch_ratio=0.25, normalize_type=None, clip_norm=1, parallel=False, logger_file_path='log/RNNPointerAllLoss.log')
+                       learning_rate=6.25e-5, epoches=40, saved_name='RNNPointerAllLossWithContentEmbedding.pkl', load_name='RNNPointerAllLossWithContentEmbedding.pkl',
+                       epoch_ratio=0.25, normalize_type=None, atte_position_type='content', clip_norm=1, parallel=False,
+                       do_sample_evaluate=True, print_output=True, logger_file_path='log/RNNPointerAllLossWithContentEmbeddingRecords.log')
 
 
 

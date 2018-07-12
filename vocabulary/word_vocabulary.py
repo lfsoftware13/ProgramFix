@@ -33,7 +33,7 @@ class Vocabulary(object):
 
     def id_to_word(self, i):
         if i not in self.id_to_word_dict.keys():
-            print('')
+            return self.unk
         return self.id_to_word_dict[i]
 
     def parse_text(self, texts, use_position_label = False):
