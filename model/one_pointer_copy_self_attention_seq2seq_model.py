@@ -1,4 +1,5 @@
 import os
+import random
 
 import torch.nn as nn
 import torch
@@ -14,8 +15,9 @@ from common.args_util import to_cuda, get_model
 from common.logger import init_a_file_logger, info
 from common.opt import OpenAIAdam
 from common.torch_util import create_sequence_length_mask, permute_last_dim_to_second, expand_tensor_sequence_len
-from common.util import data_loader, show_process_map, PaddedList, convert_one_token_ids_to_code
-from experiment.experiment_util import load_common_error_data, load_common_error_data_sample_100
+from common.util import data_loader, show_process_map, PaddedList, convert_one_token_ids_to_code, filter_token_ids
+from experiment.experiment_util import load_common_error_data, load_common_error_data_sample_100, \
+    create_addition_error_data, create_copy_addition_data
 from model.base_attention import TransformEncoderModel, TransformDecoderModel, TrueMaskedMultiHeaderAttention, \
     register_hook, PositionWiseFeedForwardNet, is_nan, record_is_nan
 from read_data.load_data_vocabulary import create_common_error_vocabulary
@@ -27,52 +29,85 @@ MAX_LENGTH = 500
 IGNORE_TOKEN = -1
 is_debug = False
 
+
 class CCodeErrorDataSet(Dataset):
     def __init__(self,
                  data_df: pd.DataFrame,
                  vocabulary: Vocabulary,
                  set_type: str,
                  transform=None):
-        self.data_df = data_df[data_df['error_code_word_id'].map(lambda x: x is not None)]
-        # print(self.data_df['error_code_word_id'])
-        self.data_df = self.data_df[self.data_df['error_code_word_id'].map(lambda x: len(x) < MAX_LENGTH)]
         self.set_type = set_type
         self.transform = transform
         self.vocabulary = vocabulary
+        if data_df is not None:
+            self.data_df = self.filter_df(data_df)
+            self._samples = [self._get_raw_sample(row) for i, row in self.data_df.iterrows()]
+            if self.transform:
+                self._samples = show_process_map(self.transform, self._samples)
+            # for s in self._samples:
+            #     for k, v in s.items():
+            #         print("{}:shape {}".format(k, np.array(v).shape))
 
-        self._samples = [self._get_raw_sample(i) for i in range(len(self.data_df))]
-        if self.transform:
-            self._samples = show_process_map(self.transform, self._samples)
-        # for s in self._samples:
-        #     for k, v in s.items():
-        #         print("{}:shape {}".format(k, np.array(v).shape))
+    def filter_df(self, df):
+        df = df[df['error_code_word_id'].map(lambda x: x is not None)]
+        # print('CCodeErrorDataSet df before: {}'.format(len(df)))
+        df = df[df['distance'].map(lambda x: x >= 0)]
+        # print('CCodeErrorDataSet df after: {}'.format(len(df)))
+        # print(self.data_df['error_code_word_id'])
+        df = df[df['error_code_word_id'].map(lambda x: len(x) < MAX_LENGTH)]
+        return df
 
-    def _get_raw_sample(self, index):
+    def _get_raw_sample(self, row):
         # error_tokens = self.vocabulary.parse_text_without_pad([[k.value for k in self.data_df.iloc[index]["tokens"]]],
         #                                                       use_position_label=True)[0]
         # ac_tokens = self.vocabulary.parse_text_without_pad([[k.value for k in self.data_df.iloc[index]["ac_tokens"]]],
         #                                                       use_position_label=True)[0]
 
-        sample = {"error_tokens": self.data_df.iloc[index]['error_code_word_id'],
-                  'error_length': len(self.data_df.iloc[index]['error_code_word_id']),
-                  'includes': self.data_df.iloc[index]['includes']}
+        sample = {"error_tokens": row['error_code_word_id'],
+                  'error_length': len(row['error_code_word_id']),
+                  'includes': row['includes']}
         if self.set_type != 'valid' or self.set_type != 'test':
             begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[0])
             end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[0])
-            sample['ac_tokens'] = [begin_id] + self.data_df.iloc[index]['ac_code_word_id'] + [end_id]
+            sample['ac_tokens'] = [begin_id] + row['ac_code_word_id'] + [end_id]
             sample['ac_length'] = len(sample['ac_tokens'])
-            sample['token_map'] = self.data_df.iloc[index]['token_map']
-            sample['pointer_map'] = create_pointer_map(sample['ac_length'], sample['token_map'])
-            sample['error_mask'] = self.data_df.iloc[index]['error_mask']
-            sample['is_copy'] = [0] + self.data_df.iloc[index]['is_copy'] + [0]
+            # sample['token_map'] = self.data_df.iloc[index]['token_map']
+            # sample['pointer_map'] = create_pointer_map(sample['ac_length'], sample['token_map'])
+            sample['pointer_map'] = [0] + row['pointer_map'] + [sample['error_length']-1]
+            # sample['error_mask'] = self.data_df.iloc[index]['error_mask']
+            sample['is_copy'] = [0] + row['is_copy'] + [0]
+            sample['distance'] = row['distance']
         else:
             sample['ac_tokens'] = None
             sample['ac_length'] = 0
-            sample['token_map'] = None
+            # sample['token_map'] = None
             sample['pointer_map'] = None
-            sample['error_mask'] = None
+            # sample['error_mask'] = None
             sample['is_copy'] = None
+            sample['distance'] = 0
         return sample
+
+    def add_samples(self, df):
+        df = self.filter_df(df)
+        self._samples += [self._get_raw_sample(row) for i, row in df.iterrows()]
+
+    def remain_samples(self, count=0, frac=1.0):
+        if count != 0:
+            self._samples = random.sample(self._samples, count)
+        elif frac != 1:
+            count = int(len(self._samples) * frac)
+            self._samples = random.sample(self._samples, count)
+
+    def combine_dataset(self, dataset):
+        d = CCodeErrorDataSet(data_df=None, vocabulary=self.vocabulary, set_type=self.set_type, transform=self.transform)
+        d._samples = self._samples + dataset._samples
+        return d
+
+    def remain_dataset(self, count=0, frac=1.0):
+        d = CCodeErrorDataSet(data_df=None, vocabulary=self.vocabulary, set_type=self.set_type,
+                              transform=self.transform)
+        d._samples = self._samples
+        d.remain_samples(count=count, frac=frac)
 
     def __getitem__(self, index):
         return self._samples[index]
@@ -706,7 +741,73 @@ def evaluate(model, dataset, batch_size, loss_function, vocab, do_sample=False, 
     return (total_loss / count).item(), (total_accuracy / count).item(), (total_correct/total_batch).item()
 
 
-def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, decoder_stack_num, num_layers, dropout_p, learning_rate, epoches, saved_name, load_name=None, epoch_ratio=1.0, normalize_type='layer', atte_position_type='position', clip_norm=80, parallel=False, logger_file_path=None, do_sample_evaluate=False, print_output=False):
+def sample_better_output(model, dataset, batch_size, vocab, do_sample=False, epoch_ratio=1.0):
+    steps = 0
+    model.eval()
+    start_id = vocab.word_to_id(vocab.begin_tokens[0])
+    end_id = vocab.word_to_id(vocab.end_tokens[0])
+    unk_id = vocab.word_to_id(vocab.unk)
+
+    records = []
+
+    with tqdm(total=(len(dataset) * epoch_ratio)) as pbar:
+        with torch.no_grad():
+            for batch_data in data_loader(dataset, batch_size=batch_size, drop_last=True, epoch_ratio=epoch_ratio):
+                model.zero_grad()
+                # target_ac_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['ac_tokens'])))
+                # target_pointer_output = to_cuda(torch.LongTensor(PaddedList(batch_data['pointer_map'])))
+                # target_is_copy = to_cuda(torch.Tensor(PaddedList(batch_data['is_copy'])))
+                # max_output = max(batch_data['ac_length'])
+                # output_mask = create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['ac_length'])),
+                #                                           max_len=max_output)
+
+                # model_input = parse_input_batch_data(batch_data)
+                model_input = parse_rnn_input_batch_data(batch_data)
+                model_target = parse_target_batch_data(batch_data)
+                target_is_copy, target_pointer_output, target_ac_tokens, output_mask = model_target
+                # is_copy, value_output, pointer_output = model.forward(*model_input)
+                if do_sample:
+                    _, is_copy, value_output, pointer_output = model.forward(*model_input[:2], None, None, test=True)
+                    predict_len = is_copy.shape[1]
+                    target_len = target_is_copy.shape[1]
+                    expand_len = max(predict_len, target_len)
+                    is_copy = expand_tensor_sequence_len(is_copy, max_len=expand_len, fill_value=0)
+                    value_output = expand_tensor_sequence_len(value_output, max_len=expand_len, fill_value=0)
+                    pointer_output = expand_tensor_sequence_len(pointer_output, max_len=expand_len, fill_value=0)
+                    # target_is_copy = expand_tensor_sequence_len(target_is_copy, max_len=expand_len, fill_value=0)
+                    # target_pointer_output = expand_tensor_sequence_len(target_pointer_output, max_len=expand_len,
+                    #                                                    fill_value=IGNORE_TOKEN)
+                    target_ac_tokens = expand_tensor_sequence_len(target_ac_tokens, max_len=expand_len,
+                                                                  fill_value=IGNORE_TOKEN)
+                    # output_mask = expand_tensor_sequence_len(output_mask, max_len=expand_len, fill_value=0)
+                else:
+                    is_copy, value_output, pointer_output = model.forward(*model_input)
+
+                output_ids = create_output_ids(is_copy, value_output, pointer_output, model_input[0])
+
+                output_ids = output_ids.tolist()
+                target_ac_tokens = target_ac_tokens.tolist()
+                for out, tar, dis, inc in zip(output_ids, target_ac_tokens, batch_data['distance'], batch_data['includes']):
+                    out, end_pos = filter_token_ids(out, start_id, end_id, unk_id)
+                    tar, tar_end_pos = filter_token_ids(tar, start_id, end_id, unk_id)
+                    if end_pos is None or tar_end_pos is None:
+                        continue
+                    obj = {'error_code_word_id': out, 'ac_code_word_id': tar, 'original_distance': dis, 'includes': inc}
+                    records += [obj]
+
+                steps += 1
+                pbar.update(batch_size)
+
+        # output_result, is_copy, value_output, pointer_output = model.forward_test(*parse_test_batch_data(batch_data))
+
+    return records
+
+
+def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, decoder_stack_num, num_layers, dropout_p,
+                       learning_rate, epoches, saved_name, load_name=None, epoch_ratio=1.0, normalize_type='layer',
+                       atte_position_type='position', clip_norm=80, parallel=False, logger_file_path=None,
+                       do_sample_evaluate=False, print_output=False, addition_train=False, addition_train_remain_frac=1.0,
+                       start_epoch=0, ac_copy_train=False, addition_epoch_ratio=0.4, ac_copy_radio=1.0):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -751,6 +852,15 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
 
     train_dataset, valid_dataset, test_dataset = datasets
 
+    combine_base_train_set = train_dataset
+    if ac_copy_train:
+        ac_copy_data_dict = create_copy_addition_data(data_dict[0]['ac_code_word_id'], data_dict[0]['includes'])
+        ac_copy_dataset = CCodeErrorDataSet(pd.DataFrame(ac_copy_data_dict), vocabulary, 'ac_copy')
+        info_output = "There are {} parsed data in the {} dataset".format(len(ac_copy_dataset), 'ac_copy')
+        print(info_output)
+        combine_base_train_set = combine_base_train_set.combine_dataset(ac_copy_dataset)
+    addition_dataset = None
+
     # model = SelfAttentionPointerNetworkModel(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
     #                                  encoder_stack_num=encoder_stack_num, decoder_stack_num=decoder_stack_num,
     #                                  start_label=begin_tokens_id[0], end_label=end_tokens_id[0], dropout_p=dropout_p,
@@ -781,10 +891,10 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
             sample_test_loss, sample_test_accuracy, sample_test_correct = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
                                                 loss_function=loss_fn, do_sample=True, vocab=vocabulary, print_output=print_output)
         evaluate_output = 'evaluate: valid loss of {}, test loss of {}, ' \
-                          'valid_accuracy result of {}, test_accuracy result of {}' \
-                          'valid correct result of {}, test correct result of {}' \
+                          'valid_accuracy result of {}, test_accuracy result of {}, ' \
+                          'valid correct result of {}, test correct result of {}, ' \
                           'sample valid loss: {}, sample test loss: {}, ' \
-                          'sample valid accuracy: {}, sample test accuracy: {}' \
+                          'sample valid accuracy: {}, sample test accuracy: {}, ' \
                           'sample valid correct: {}, sample test correct: {}'.format(
             valid_loss, test_loss, valid_accuracy, test_accuracy, valid_correct, test_correct,
             sample_valid_loss, sample_test_loss, sample_valid_accuracy, sample_test_accuracy, sample_valid_correct, sample_test_correct)
@@ -792,8 +902,33 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
         info(evaluate_output)
         pass
 
-    for epoch in range(epoches):
-        train_loss, train_accuracy = train(model=model, dataset=train_dataset, batch_size=batch_size,
+    for epoch in range(start_epoch, start_epoch+epoches):
+        print('----------------------- in epoch {} --------------------'.format(epoch))
+        combine_train_set = train_dataset
+        if addition_train:
+            addition_predict_dataset = train_dataset
+            if addition_dataset is not None:
+                addition_predict_radio = addition_epoch_ratio/(addition_epoch_ratio+1)
+                addition_predict_dataset = addition_predict_dataset.combine_dataset(addition_dataset)
+            else:
+                addition_predict_radio = addition_epoch_ratio
+            records = sample_better_output(model=model, dataset=addition_predict_dataset, batch_size=batch_size,
+                                           vocab=vocabulary, do_sample=True, epoch_ratio=addition_predict_radio)
+
+            addition_dict = create_addition_error_data(records)
+            if addition_dataset is None:
+                addition_dataset = CCodeErrorDataSet(pd.DataFrame(addition_dict), vocabulary, 'addition_train')
+            else:
+                addition_dataset.remain_samples(frac=addition_train_remain_frac)
+                addition_dataset.add_samples(pd.DataFrame(addition_dict).sample(frac=1 - addition_train_remain_frac))
+            info_output = "In epoch {}, there are {} parsed data in the {} dataset".format(epoch, len(addition_dataset), 'addition_train')
+            print(info_output)
+            combine_train_set = combine_train_set.combine_dataset(addition_dataset)
+
+        if ac_copy_train:
+            combine_train_set = combine_train_set.combine_dataset(ac_copy_dataset.remain_dataset(frac=ac_copy_radio))
+
+        train_loss, train_accuracy = train(model=model, dataset=combine_train_set, batch_size=batch_size,
                                            loss_function=loss_fn, optimizer=optimizer, clip_norm=clip_norm,
                                            epoch_ratio=epoch_ratio)
         valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
@@ -832,14 +967,11 @@ if __name__ == '__main__':
     #                    epoch_ratio=0.25, normalize_type=None, atte_position_type='position', clip_norm=1, parallel=False,
     #                    do_sample_evaluate=True, print_output=True, logger_file_path='log/RNNPointerAllLossRecords.log')
 
-    train_and_evaluate(batch_size=16, hidden_size=400, num_heads=0, encoder_stack_num=0, decoder_stack_num=0, num_layers=3, dropout_p=0,
-                       learning_rate=6.25e-5, epoches=40, saved_name='RNNPointerAllLossWithContentEmbedding.pkl', load_name='RNNPointerAllLossWithContentEmbedding.pkl',
+    train_and_evaluate(batch_size=12, hidden_size=400, num_heads=0, encoder_stack_num=0, decoder_stack_num=0, num_layers=3, dropout_p=0,
+                       learning_rate=6.25e-5, epoches=40, saved_name='RNNPointerAllLossWithContentEmbeddingCombineTrain.pkl', load_name='RNNPointerAllLossWithContentEmbeddingCombineTrain.pkl',
                        epoch_ratio=0.25, normalize_type=None, atte_position_type='content', clip_norm=1, parallel=False,
-                       do_sample_evaluate=True, print_output=True, logger_file_path='log/RNNPointerAllLossWithContentEmbeddingRecords.log')
-
-
-
-
-
+                       do_sample_evaluate=False, print_output=False, logger_file_path='log/RNNPointerAllLossWithContentEmbeddingCombineTrain.log',
+                       addition_train=True, addition_train_remain_frac=0.2, start_epoch=43, ac_copy_train=True, addition_epoch_ratio=0.4,
+                       ac_copy_radio=0.3)
 
 

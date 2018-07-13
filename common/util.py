@@ -658,8 +658,8 @@ def filter_token_ids(token_ids, start, end, unk):
         token_ids = token_ids[:end_position]
     except ValueError as e:
         end_position = None
-    token_ids = filter_special_token(token_ids, start)
-    token_ids = filter_special_token(token_ids, end)
+    # token_ids = filter_special_token(token_ids, start)
+    # token_ids = filter_special_token(token_ids, end)
     token_ids = filter_special_token(token_ids, unk)
     return token_ids, end_position
 
@@ -669,8 +669,9 @@ def convert_one_token_ids_to_code(token_ids, id_to_word_fn, start, end, unk, inc
     token_ids, _ = filter_token_ids(token_ids, start, end, unk)
     tokens = [id_to_word_fn(tok) for tok in token_ids]
     code = ' '.join(tokens)
-    for inc in includes:
-        code = (inc + '\n') + code
+    if includes is not None:
+        for inc in includes:
+            code = (inc + '\n') + code
     return code
 
 

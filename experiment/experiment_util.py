@@ -4,7 +4,7 @@ from common.analyse_include_util import extract_include, replace_include_with_bl
 from common.constants import CACHE_DATA_PATH
 from common.pycparser_util import tokenize_by_clex_fn
 from common.util import disk_cache
-from experiment.parse_xy_util import parse_error_tokens_and_action_map, parse_test_tokens
+from experiment.parse_xy_util import parse_error_tokens_and_action_map, parse_test_tokens, parse_output_and_position_map
 from read_data.load_data_vocabulary import create_common_error_vocabulary
 from read_data.read_experiment_data import read_fake_common_c_error_dataset_with_limit_length
 
@@ -38,11 +38,14 @@ def load_common_error_data():
     test = test.loc[test_data[0].index.values]
 
     train_dict = {'error_code_word_id': train_data[0], 'ac_code_word_id': train_data[1],
-                  'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'], 'is_copy': train_data[4]}
+                  'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'],
+                  'is_copy': train_data[4], 'pointer_map': train_data[5], 'distance': train_data[6]}
     valid_dict = {'error_code_word_id': vaild_data[0], 'ac_code_word_id': vaild_data[1],
-                  'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'], 'is_copy': vaild_data[4]}
+                  'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'],
+                  'is_copy': vaild_data[4], 'pointer_map': vaild_data[5], 'distance': vaild_data[6]}
     test_dict = {'error_code_word_id': test_data[0], 'ac_code_word_id': test_data[1], 'token_map': test_data[2],
-                 'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4]}
+                 'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4],
+                 'pointer_map': test_data[5], 'distance': test_data[6]}
     # valid_dict = {'error_code_word_id': vaild_data, 'includes': vaild['includes']}
     # test_dict = {'error_code_word_id': test_data, 'includes': test['includes']}
 
@@ -81,11 +84,14 @@ def load_common_error_data_sample_100():
     test = test.loc[test_data[0].index.values]
 
     train_dict = {'error_code_word_id': train_data[0], 'ac_code_word_id': train_data[1],
-                  'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'], 'is_copy': train_data[4]}
+                  'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'],
+                  'is_copy': train_data[4], 'pointer_map': train_data[5], 'distance': train_data[6]}
     valid_dict = {'error_code_word_id': vaild_data[0], 'ac_code_word_id': vaild_data[1],
-                  'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'], 'is_copy': vaild_data[4]}
+                  'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'],
+                  'is_copy': vaild_data[4], 'pointer_map': vaild_data[5], 'distance': vaild_data[6]}
     test_dict = {'error_code_word_id': test_data[0], 'ac_code_word_id': test_data[1], 'token_map': test_data[2],
-                 'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4]}
+                 'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4],
+                 'pointer_map': test_data[5], 'distance': test_data[6]}
     # valid_dict = {'error_code_word_id': vaild_data, 'includes': vaild['includes']}
     # test_dict = {'error_code_word_id': test_data, 'includes': test['includes']}
 
@@ -95,6 +101,28 @@ def load_common_error_data_sample_100():
     # print(train_data[0])
 
     return train_dict, valid_dict, test_dict
+
+
+def create_addition_error_data(records):
+    error_code_word_ids = [rec['error_code_word_id'] for rec in records]
+    ac_code_word_ids = [rec['ac_code_word_id'] for rec in records]
+    includes = [rec['includes'] for rec in records]
+    res = [parse_output_and_position_map(rec['error_code_word_id'], rec['ac_code_word_id'], rec['original_distance'])
+           for rec in records]
+    distances, is_copys, pointer_maps = list(zip(*res))
+    addition_dict = {'error_code_word_id': error_code_word_ids, 'ac_code_word_id': ac_code_word_ids,
+                     'includes': includes, 'is_copy': is_copys, 'pointer_map': pointer_maps, 'distance': distances}
+    return addition_dict
+
+
+def create_copy_addition_data(ac_code_ids, includes):
+    ac_code_word_ids = ac_code_ids
+    distances = [0 for i in range(len(ac_code_ids))]
+    is_copys = [[1 for i in range(len(ac_ids))] for ac_ids in ac_code_ids]
+    pointer_maps = [[i for i in range(len(ac_ids))] for ac_ids in ac_code_ids]
+    addition_dict = {'error_code_word_id': ac_code_word_ids, 'ac_code_word_id': ac_code_word_ids,
+                     'includes': includes, 'is_copy': is_copys, 'pointer_map': pointer_maps, 'distance': distances}
+    return addition_dict
 
 
 # ---------------------------- convert c code fields to cpp fields ---------------------------------- #

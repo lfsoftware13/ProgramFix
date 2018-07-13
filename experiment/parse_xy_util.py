@@ -12,6 +12,9 @@ from torch.nn import functional as F
 
 
 # ------------------------- produce part token by part position list using tokens tensor --------------------------- #
+from experiment.generate_error.generate_error_actions import generate_actions_from_ac_to_error_by_code
+
+
 def combine_spilt_tokens_batch_with_tensor(tokens_tensor_total, ac_tokens_list, stay_labels_list, token_map_list,
                                            gap_tensor, begin_tensor, end_tensor, gap_token, begin_token, end_token, gpu_index=None):
     """
@@ -259,7 +262,23 @@ def parse_error_tokens_and_action_map(df, data_type, keyword_vocab, sort_fn=None
 
     df['is_copy'] = df.apply(create_is_copy_for_ac_tokens, raw=True, axis=1)
 
-    return df['error_code_word_id'], df['ac_code_word_id'], df['token_map'], df['error_mask'], df['is_copy']
+    df['pointer_map'] = df.apply(create_one_pointer_map_for_ac_tokens, raw=True, axis=1)
+
+    df['distance'] = df['action_list'].map(len)
+
+    return df['error_code_word_id'], df['ac_code_word_id'], df['token_map'], df['error_mask'], df['is_copy'], df['pointer_map'], df['distance']
+
+
+def parse_output_and_position_map(error_ids, ac_ids, original_distance):
+    dis, action_list = generate_actions_from_ac_to_error_by_code(error_ids, ac_ids, max_distance=10)
+    if dis >= original_distance or dis <= 0 or dis >= 10:
+        return -1, None, None
+
+    is_copy = create_copy_for_ac_tokens(ac_ids, action_list)
+
+    pointer_map = create_pointer_map_for_ac_tokens(ac_ids, action_list, len(error_ids))
+
+    return dis, is_copy, pointer_map
 
 
 def create_token_id_input(one, keyword_voc):
@@ -426,6 +445,11 @@ def create_is_copy_for_ac_tokens(one):
     ac_code_obj = one['ac_code_obj']
     action_token_list = json.loads(one['action_character_list'])
 
+    is_copy_label = create_copy_for_ac_tokens(ac_code_obj, action_token_list)
+    return is_copy_label
+
+
+def create_copy_for_ac_tokens(ac_code_obj, action_token_list):
     is_copy_label = [1 for i in range(len(ac_code_obj))]
 
     for cur_action in action_token_list:
@@ -437,6 +461,43 @@ def create_is_copy_for_ac_tokens(one):
         elif cur_type == CHANGE:
             is_copy_label[cur_token_pos] = 0
     return is_copy_label
+
+
+def create_one_pointer_map_for_ac_tokens(one):
+    ac_code_obj = one['ac_code_obj']
+    action_token_list = json.loads(one['action_character_list'])
+    error_len = len(one['error_code_word_id'])
+
+    pointer_map = create_pointer_map_for_ac_tokens(ac_code_obj, action_token_list, error_len)
+    return pointer_map
+
+
+def create_pointer_map_for_ac_tokens(ac_code_obj, action_token_list, error_len):
+    pointer_map = [i for i in range(len(ac_code_obj))]
+
+    for cur_action in action_token_list:
+        cur_token_pos = cur_action['token_pos']
+        cur_type = cur_action['act_type']
+
+        if cur_type == DELETE:
+            pointer_map[cur_token_pos] = -1
+            for i in range(cur_token_pos + 1, len(pointer_map)):
+                if pointer_map[i] != -1:
+                    pointer_map[i] -= 1
+        elif cur_type == INSERT:
+            for i in range(cur_token_pos, len(pointer_map)):
+                if pointer_map[i] != -1:
+                    pointer_map[i] += 1
+
+    last_point = -1
+    for i in range(len(pointer_map)):
+        if pointer_map[i] == -1:
+            pointer_map[i] = last_point + 1
+        else:
+            last_point = pointer_map[i]
+            if last_point + 1 >= error_len:
+                last_point = error_len - 2
+    return pointer_map
 
 
 def calculate_action_bias_from_iterative_to_static(action_list):
