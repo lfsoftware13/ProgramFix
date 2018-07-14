@@ -666,13 +666,13 @@ def filter_token_ids(token_ids, start, end, unk):
 def convert_one_token_ids_to_code(token_ids, id_to_word_fn, start, end, unk, includes=None):
     if not isinstance(token_ids, list):
         token_ids = list(token_ids)
-    token_ids, _ = filter_token_ids(token_ids, start, end, unk)
+    token_ids, end_pos = filter_token_ids(token_ids, start, end, unk)
     tokens = [id_to_word_fn(tok) for tok in token_ids]
     code = ' '.join(tokens)
     if includes is not None:
         for inc in includes:
             code = (inc + '\n') + code
-    return code
+    return code, end_pos
 
 
 def compile_syntax_c_code_by_gcc(code, file_path):

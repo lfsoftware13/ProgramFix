@@ -15,9 +15,11 @@ from common.args_util import to_cuda, get_model
 from common.logger import init_a_file_logger, info
 from common.opt import OpenAIAdam
 from common.torch_util import create_sequence_length_mask, permute_last_dim_to_second, expand_tensor_sequence_len
-from common.util import data_loader, show_process_map, PaddedList, convert_one_token_ids_to_code, filter_token_ids
+from common.util import data_loader, show_process_map, PaddedList, convert_one_token_ids_to_code, filter_token_ids, \
+    compile_c_code_by_gcc
 from experiment.experiment_util import load_common_error_data, load_common_error_data_sample_100, \
     create_addition_error_data, create_copy_addition_data
+from experiment.parse_xy_util import parse_output_and_position_map
 from model.base_attention import TransformEncoderModel, TransformDecoderModel, TrueMaskedMultiHeaderAttention, \
     register_hook, PositionWiseFeedForwardNet, is_nan, record_is_nan
 from read_data.load_data_vocabulary import create_common_error_vocabulary
@@ -703,9 +705,9 @@ def evaluate(model, dataset, batch_size, loss_function, vocab, do_sample=False, 
                                                                                   pointer_output,
                                                                                   target_pointer_output, target_length):
                     # for out, tar,  in zip(output_ids, target_ids):
-                        out_code = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word, start=start_id,
+                        out_code, end_pos = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word, start=start_id,
                                                              end=end_id, unk=unk_id)
-                        tar_code = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word, start=start_id,
+                        tar_code, tar_end_pos = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word, start=start_id,
                                                              end=end_id, unk=unk_id)
                         info('-------------- step {} ------------------------'.format(steps))
                         info('output: {}'.format(out_code))
@@ -736,9 +738,170 @@ def evaluate(model, dataset, batch_size, loss_function, vocab, do_sample=False, 
                 steps += 1
                 pbar.update(batch_size)
 
+    return (total_loss / count).item(), (total_accuracy / count).item(), (total_correct/total_batch).item()
+
+
+def evaluate_multi_step(model, dataset, batch_size, vocab, do_sample=False, print_output=False, max_sample_times=1, file_path=None):
+    count = to_cuda(torch.Tensor([0]))
+    total_batch = to_cuda(torch.Tensor([0]))
+    steps = 0
+    total_accuracy = to_cuda(torch.Tensor([0]))
+    total_correct = to_cuda(torch.Tensor([0]))
+    total_compile_success = 0.0
+    total_first_compile_success = 0.0
+    model.eval()
+    start_id = vocab.word_to_id(vocab.begin_tokens[0])
+    end_id = vocab.word_to_id(vocab.end_tokens[0])
+    unk_id = vocab.word_to_id(vocab.unk)
+    max_sample_times = 1 if max_sample_times < 1 else max_sample_times
+
+    with tqdm(total=len(dataset)) as pbar:
+        with torch.no_grad():
+            for batch_data in data_loader(dataset, batch_size=batch_size, drop_last=True):
+                model.zero_grad()
+                # target_ac_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['ac_tokens'])))
+                # target_pointer_output = to_cuda(torch.LongTensor(PaddedList(batch_data['pointer_map'])))
+                # target_is_copy = to_cuda(torch.Tensor(PaddedList(batch_data['is_copy'])))
+                # max_output = max(batch_data['ac_length'])
+                # output_mask = create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['ac_length'])),
+                #                                           max_len=max_output)
+                batch_continue = [True for i in range(batch_size)]
+                batch_compile_success = [False for i in range(batch_size)]
+                total_output_records = []
+                total_compile_records = []
+                total_continue_records = []
+                first_sample_success = 0
+
+                input_data = batch_data
+                target_data = batch_data
+
+                for t in range(max_sample_times):
+                    # model_input = parse_input_batch_data(batch_data)
+                    model_input = parse_rnn_input_batch_data(input_data)
+                    error_tokens, input_mask, ac_tokens, output_mask = model_input
+                    # is_copy, value_output, pointer_output = model.forward(*model_input)
+                    if do_sample:
+                        _, is_copy, value_output, pointer_output = model.forward(error_tokens, input_mask, None, None,
+                                                                                 test=True)
+                    else:
+                        is_copy, value_output, pointer_output = model.forward(error_tokens, input_mask, ac_tokens,
+                                                                              output_mask)
+                    output_ids = create_output_ids(is_copy, value_output, pointer_output, model_input[0])
+                    output_ids_list = output_ids.tolist()
+
+                    compile_result = []
+                    cur_continue = []
+                    # compile the continue batch output and record
+                    for out, inc, bat_con in zip(output_ids_list, batch_data['includes'], batch_continue):
+                        res = False
+                        con = False
+                        if bat_con:
+                            out_code, end_pos = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word, start=start_id,
+                                                                          end=end_id, unk=unk_id, includes=inc)
+                            if end_pos is not None:
+                                res = compile_c_code_by_gcc(out_code, file_path)
+                                con = not res
+                        compile_result += [res]
+                        cur_continue += [con]
+                    if t == 0:
+                        success_l = [1 if c else 0 for c in compile_result]
+                        first_sample_success = sum(success_l)
+                        total_first_compile_success += first_sample_success
+
+                    next_input_id = []
+                    # create next input token ids
+                    for bat_con, out, err in zip(batch_continue, output_ids_list, input_data['error_tokens']):
+                        if bat_con:
+                            ids, error_pos = filter_token_ids(out, start=start_id, end=end_id, unk=unk_id)
+                        else:
+                            ids = err
+                        next_input_id += [ids]
+                    input_data['error_tokens'] = next_input_id
+                    input_data['error_length'] = [len(toks) for toks in input_data['error_tokens']]
+                    total_output_records += [input_data['error_tokens']]
+
+                    batch_continue = [b and c for b, c in zip(batch_continue, cur_continue)]
+                    batch_compile_success = [b or c for b, c in zip(batch_compile_success, compile_result)]
+                    total_continue_records += [batch_continue]
+                    total_compile_records += [batch_compile_success]
+
+                output_ids = to_cuda(torch.LongTensor(PaddedList(input_data['error_tokens'])))
+                model_target = parse_target_batch_data(target_data)
+                target_is_copy, target_pointer_output, target_ac_tokens, output_mask = model_target
+                batch_count = torch.sum(output_mask).float()
+
+                if do_sample:
+                    predict_len = output_ids.shape[1]
+                    target_len = target_ac_tokens.shape[1]
+                    expand_len = max(predict_len, target_len)
+                    output_ids = expand_tensor_sequence_len(output_ids, max_len=expand_len, fill_value=0)
+                    target_ac_tokens = expand_tensor_sequence_len(target_ac_tokens, max_len=expand_len,
+                                                                  fill_value=IGNORE_TOKEN)
+                    output_mask = expand_tensor_sequence_len(output_mask, max_len=expand_len, fill_value=0)
+
+                batch_accuracy = torch.sum(torch.eq(output_ids, target_ac_tokens) & output_mask).float()
+                batch_correct = torch.sum(
+                    torch.eq(torch.sum(torch.ne(output_ids, target_ac_tokens) & output_mask, dim=-1), 0)).float()
+                correct = batch_correct / batch_size
+                accuracy = batch_accuracy / batch_count
+                total_accuracy += batch_accuracy
+                total_correct += batch_correct
+
+                compile_success_count = 0
+                for r in batch_compile_success:
+                    if r:
+                        compile_success_count += 1
+                total_compile_success += compile_success_count
+
+                step_output = '|      in evaluate step {}, accracy: {}, correct: {}, compile: {}, ' \
+                              'first_compile: {}'.format(steps, accuracy.data.item(), correct.data.item(),
+                                                         compile_success_count/batch_size, first_sample_success/batch_size)
+                # print(step_output)
+                info(step_output)
+
+                if print_output and steps % 10 == 0:
+                    tmp_count = 0
+                    for out_list, con_list, res_list, tar in zip(list(zip(*total_output_records)), list(zip(*total_continue_records)),
+                                             list(zip(*total_compile_records)), input_data['ac_tokens']):
+                        s = 0
+                        for out, con, res in zip(out_list, con_list, res_list):
+                            out_code, end_pos = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word,
+                                                                              start=start_id,
+                                                                              end=end_id, unk=unk_id)
+                            tar_code, tar_end_pos = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word,
+                                                                                  start=start_id,
+                                                                                  end=end_id, unk=unk_id)
+                            info('--------------------------- step {} {} th records {} times iteration------------------------'.format(
+                                steps, tmp_count, s))
+                            info('continue: {}, compile result: {}'.format(con, res))
+                            info('output: {}'.format(out_code))
+                            info('target: {}'.format(tar_code))
+                            s += 1
+                        tmp_count += 1
+
+                # if print_output and steps % 10 == 0:
+                #     output_ids = output_ids.tolist()
+                #     target_ids = batch_data['ac_tokens']
+                #     target_ac_tokens = target_ac_tokens.tolist()
+                #     # target_length = torch.sum(output_mask, dim=-1)
+                #     # target_length = target_length.tolist()
+                #     for out, tar, val, tar_val in zip(output_ids, target_ids, target_ac_tokens):
+                #         out_code, end_pos = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word, start=start_id,
+                #                                              end=end_id, unk=unk_id)
+                #         tar_code, tar_end_pos = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word, start=start_id,
+                #                                              end=end_id, unk=unk_id)
+                #         info('-------------- step {} ------------------------'.format(steps))
+                #         info('output: {}'.format(out_code))
+                #         info('target: {}'.format(tar_code))
+
+                count += batch_count
+                steps += 1
+                total_batch += batch_size
+                pbar.update(batch_size)
+
         # output_result, is_copy, value_output, pointer_output = model.forward_test(*parse_test_batch_data(batch_data))
 
-    return (total_loss / count).item(), (total_accuracy / count).item(), (total_correct/total_batch).item()
+    return (total_compile_success / total_batch), (total_accuracy / count).item(), (total_correct/total_batch).item(), (total_first_compile_success, total_batch)
 
 
 def sample_better_output(model, dataset, batch_size, vocab, do_sample=False, epoch_ratio=1.0):
@@ -807,7 +970,8 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
                        learning_rate, epoches, saved_name, load_name=None, epoch_ratio=1.0, normalize_type='layer',
                        atte_position_type='position', clip_norm=80, parallel=False, logger_file_path=None,
                        do_sample_evaluate=False, print_output=False, addition_train=False, addition_train_remain_frac=1.0,
-                       start_epoch=0, ac_copy_train=False, addition_epoch_ratio=0.4, ac_copy_radio=1.0):
+                       start_epoch=0, ac_copy_train=False, addition_epoch_ratio=0.4, ac_copy_radio=1.0,
+                       do_multi_step_evaluate=False, max_sample_times=1, compile_file_path=None):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -881,10 +1045,27 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
 
     if load_name is not None:
-        valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
-                                              loss_function=loss_fn, vocab=vocabulary)
-        test_loss, test_accuracy, test_correct = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
-                                            loss_function=loss_fn, vocab=vocabulary)
+        # valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+        #                                       loss_function=loss_fn, vocab=vocabulary)
+        # test_loss, test_accuracy, test_correct = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+        #                                     loss_function=loss_fn, vocab=vocabulary)
+        if do_multi_step_evaluate:
+            sample_valid_compile, sample_valid_accuracy, sample_valid_correct, first_sample_valid_compile = evaluate_multi_step(model=model, dataset=valid_dataset,
+                     batch_size=batch_size, do_sample=True, vocab=vocabulary, print_output=print_output,
+                     max_sample_times=max_sample_times, file_path=compile_file_path)
+            sample_test_compile, sample_test_accuracy, sample_test_correct, first_sample_test_compile = evaluate_multi_step(model=model, dataset=test_dataset,
+                    batch_size=batch_size, do_sample=True, vocab=vocabulary, print_output=print_output,
+                    max_sample_times=max_sample_times, file_path=compile_file_path)
+            evaluate_output = 'evaluate in multi step: sample valid compile: {}, sample test compile: {}, ' \
+                              'first_sample_valid_compile: {}, first_sample_test_compile: {}' \
+                              'sample valid accuracy: {}, sample test accuracy: {}, ' \
+                              'sample valid correct: {}, sample test correct: {}'.format(
+                sample_valid_compile, sample_test_compile, first_sample_valid_compile, first_sample_test_compile,
+                sample_valid_accuracy, sample_test_accuracy, sample_valid_correct,
+                sample_test_correct)
+            print(evaluate_output)
+            info(evaluate_output)
+
         if do_sample_evaluate:
             sample_valid_loss, sample_valid_accuracy, sample_valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
                                                   loss_function=loss_fn, do_sample=True, vocab=vocabulary, print_output=print_output)
@@ -970,8 +1151,8 @@ if __name__ == '__main__':
     train_and_evaluate(batch_size=12, hidden_size=400, num_heads=0, encoder_stack_num=0, decoder_stack_num=0, num_layers=3, dropout_p=0,
                        learning_rate=6.25e-5, epoches=40, saved_name='RNNPointerAllLossWithContentEmbeddingCombineTrain.pkl', load_name='RNNPointerAllLossWithContentEmbeddingCombineTrain.pkl',
                        epoch_ratio=0.25, normalize_type=None, atte_position_type='content', clip_norm=1, parallel=False,
-                       do_sample_evaluate=False, print_output=False, logger_file_path='log/RNNPointerAllLossWithContentEmbeddingCombineTrain.log',
-                       addition_train=True, addition_train_remain_frac=0.2, start_epoch=43, ac_copy_train=True, addition_epoch_ratio=0.4,
-                       ac_copy_radio=0.3)
+                       do_sample_evaluate=False, print_output=True, logger_file_path='log/RNNPointerAllLossWithContentEmbeddingCombineTrainMultiStepRecord.log',
+                       addition_train=True, addition_train_remain_frac=0.2, start_epoch=60, ac_copy_train=True, addition_epoch_ratio=0.4,
+                       ac_copy_radio=0.3, do_multi_step_evaluate=True, max_sample_times=5, compile_file_path='log/tmp_compile.c')
 
 
