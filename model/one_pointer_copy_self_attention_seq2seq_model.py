@@ -110,6 +110,7 @@ class CCodeErrorDataSet(Dataset):
                               transform=self.transform)
         d._samples = self._samples
         d.remain_samples(count=count, frac=frac)
+        return d
 
     def __getitem__(self, index):
         return self._samples[index]
@@ -506,9 +507,11 @@ def create_combine_loss_fn(copy_weight=1, pointer_weight=1, value_weight=1, aver
         # info('output_mask_float: {}, mask batch: {}'.format(str(output_mask_float), torch.sum(output_mask_float, dim=-1)))
         # info('target_copy: {}, mask batch: {}'.format(str(target_copy), torch.sum(target_copy, dim=-1)))
 
+
+        no_copy_weight = torch.where(target_copy.byte(), target_copy, to_cuda(torch.Tensor([15]).view(*[1 for i in range(len(target_copy.shape))])))
         copy_loss = copy_loss_fn(is_copy, target_copy)
         # record_is_nan(copy_loss, 'copy_loss: ')
-        copy_loss = copy_loss * output_mask_float
+        copy_loss = copy_loss * output_mask_float * no_copy_weight
         # record_is_nan(copy_loss, 'copy_loss with mask: ')
 
         pointer_log_probs = permute_last_dim_to_second(pointer_log_probs)
@@ -770,10 +773,13 @@ def evaluate_multi_step(model, dataset, batch_size, vocab, do_sample=False, prin
                 total_output_records = []
                 total_compile_records = []
                 total_continue_records = []
+                total_is_copy_records = []
+                total_pointer_records = []
+                total_value_records = []
                 first_sample_success = 0
 
-                input_data = batch_data
-                target_data = batch_data
+                input_data = batch_data.copy()
+                target_data = batch_data.copy()
 
                 for t in range(max_sample_times):
                     # model_input = parse_input_batch_data(batch_data)
@@ -788,6 +794,17 @@ def evaluate_multi_step(model, dataset, batch_size, vocab, do_sample=False, prin
                                                                               output_mask)
                     output_ids = create_output_ids(is_copy, value_output, pointer_output, model_input[0])
                     output_ids_list = output_ids.tolist()
+                    is_copy = (is_copy > 0.5)
+                    _, top_id = torch.topk(F.softmax(value_output, dim=-1), k=1, dim=-1)
+                    _, pointer_pos_in_input = torch.topk(F.softmax(pointer_output, dim=-1), k=1, dim=-1)
+                    pointer_pos_in_input = pointer_pos_in_input.squeeze(dim=-1)
+                    top_id = top_id.squeeze(dim=-1)
+                    is_copy_list = is_copy.tolist()
+                    pointer_pos_in_input = pointer_pos_in_input.tolist()
+                    top_id = top_id.tolist()
+                    total_is_copy_records += [is_copy_list]
+                    total_pointer_records += [pointer_pos_in_input]
+                    total_value_records += [top_id]
 
                     compile_result = []
                     cur_continue = []
@@ -861,38 +878,52 @@ def evaluate_multi_step(model, dataset, batch_size, vocab, do_sample=False, prin
 
                 if print_output and steps % 10 == 0:
                     tmp_count = 0
-                    for out_list, con_list, res_list, tar in zip(list(zip(*total_output_records)), list(zip(*total_continue_records)),
-                                             list(zip(*total_compile_records)), input_data['ac_tokens']):
+                    for out_list, con_list, res_list, tar, err, is_copy_list, pointer_list, value_list, tar_is_copy, \
+                        tar_pointer in zip(list(zip(*total_output_records)), list(zip(*total_continue_records)),
+                                             list(zip(*total_compile_records)), input_data['ac_tokens'], batch_data['error_tokens'],
+                                              list(zip(*total_is_copy_records)), list(zip(*total_pointer_records)),
+                                              list(zip(*total_value_records)), target_is_copy.long().tolist(), target_pointer_output.tolist()):
+                        info('------------------------------- in step {} record {} -------------------------------'
+                             .format(steps, tmp_count))
+                        # print input
+                        err_code, err_end_pos = convert_one_token_ids_to_code(err, id_to_word_fn=vocab.id_to_word,
+                                                                              start=start_id,
+                                                                              end=end_id, unk=unk_id)
+                        info('input : {}'.format(err_code))
+                        tar_code, tar_end_pos = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word,
+                                                                              start=start_id,
+                                                                              end=end_id, unk=unk_id)
+                        tar_len = len(tar[1:])
+                        tar_val = [str(vocab.id_to_word(v)) if c == 0 else '<COPY>' for c, v in
+                               zip(tar_is_copy[:tar_len], tar[1:1+tar_len])]
+
                         s = 0
-                        for out, con, res in zip(out_list, con_list, res_list):
+                        for out, con, res, is_cop, poi, val in zip(out_list, con_list, res_list, is_copy_list, pointer_list, value_list):
                             out_code, end_pos = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word,
                                                                               start=start_id,
                                                                               end=end_id, unk=unk_id)
-                            tar_code, tar_end_pos = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word,
-                                                                                  start=start_id,
-                                                                                  end=end_id, unk=unk_id)
-                            info('--------------------------- step {} {} th records {} times iteration------------------------'.format(
-                                steps, tmp_count, s))
+                            out_len = len(out)
+                            info('--------------------------- step {} {} th records {} times iteration------------------------'
+                                 .format(steps, tmp_count, s))
                             info('continue: {}, compile result: {}'.format(con, res))
                             info('output: {}'.format(out_code))
                             info('target: {}'.format(tar_code))
+                            is_cop_str = [str(is_c) for is_c in is_cop[:out_len+1]]
+                            info('output is_copy: {}'.format(' '.join(is_cop_str)))
+                            tar_is_cop_str = [str(is_c) for is_c in tar_is_copy[:tar_len]]
+                            info('target is_copy: {}'.format(' '.join(tar_is_cop_str)))
+                            poi_str = [str(is_c) for is_c in poi[:out_len+1]]
+                            info('output pointer: {}'.format(' '.join(poi_str)))
+                            tar_poi_str = [str(is_c) for is_c in tar_pointer[:tar_len]]
+                            info('target pointer: {}'.format(' '.join(tar_poi_str)))
+
+
+                            val = [str(vocab.id_to_word(v)) if c == 0 else '<COPY>' for c, v in zip(is_cop[:out_len+1], val[:out_len+1])]
+
+                            info('output value: {}'.format(' '.join(val)))
+                            info('target value: {}'.format(' '.join(tar_val)))
                             s += 1
                         tmp_count += 1
-
-                # if print_output and steps % 10 == 0:
-                #     output_ids = output_ids.tolist()
-                #     target_ids = batch_data['ac_tokens']
-                #     target_ac_tokens = target_ac_tokens.tolist()
-                #     # target_length = torch.sum(output_mask, dim=-1)
-                #     # target_length = target_length.tolist()
-                #     for out, tar, val, tar_val in zip(output_ids, target_ids, target_ac_tokens):
-                #         out_code, end_pos = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word, start=start_id,
-                #                                              end=end_id, unk=unk_id)
-                #         tar_code, tar_end_pos = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word, start=start_id,
-                #                                              end=end_id, unk=unk_id)
-                #         info('-------------- step {} ------------------------'.format(steps))
-                #         info('output: {}'.format(out_code))
-                #         info('target: {}'.format(tar_code))
 
                 count += batch_count
                 steps += 1
@@ -901,7 +932,7 @@ def evaluate_multi_step(model, dataset, batch_size, vocab, do_sample=False, prin
 
         # output_result, is_copy, value_output, pointer_output = model.forward_test(*parse_test_batch_data(batch_data))
 
-    return (total_compile_success / total_batch), (total_accuracy / count).item(), (total_correct/total_batch).item(), (total_first_compile_success, total_batch)
+    return (total_compile_success / total_batch).item(), (total_accuracy / count).item(), (total_correct/total_batch).item(), (total_first_compile_success / total_batch).item()
 
 
 def sample_better_output(model, dataset, batch_size, vocab, do_sample=False, epoch_ratio=1.0):
@@ -1016,13 +1047,13 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
 
     train_dataset, valid_dataset, test_dataset = datasets
 
-    combine_base_train_set = train_dataset
+    # combine_base_train_set = train_dataset
     if ac_copy_train:
         ac_copy_data_dict = create_copy_addition_data(data_dict[0]['ac_code_word_id'], data_dict[0]['includes'])
         ac_copy_dataset = CCodeErrorDataSet(pd.DataFrame(ac_copy_data_dict), vocabulary, 'ac_copy')
         info_output = "There are {} parsed data in the {} dataset".format(len(ac_copy_dataset), 'ac_copy')
         print(info_output)
-        combine_base_train_set = combine_base_train_set.combine_dataset(ac_copy_dataset)
+        # combine_base_train_set = combine_base_train_set.combine_dataset(ac_copy_dataset)
     addition_dataset = None
 
     # model = SelfAttentionPointerNetworkModel(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
@@ -1050,9 +1081,11 @@ def train_and_evaluate(batch_size, hidden_size, num_heads, encoder_stack_num, de
         # test_loss, test_accuracy, test_correct = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
         #                                     loss_function=loss_fn, vocab=vocabulary)
         if do_multi_step_evaluate:
-            sample_valid_compile, sample_valid_accuracy, sample_valid_correct, first_sample_valid_compile = evaluate_multi_step(model=model, dataset=valid_dataset,
-                     batch_size=batch_size, do_sample=True, vocab=vocabulary, print_output=print_output,
-                     max_sample_times=max_sample_times, file_path=compile_file_path)
+            sample_valid_compile = 0
+            first_sample_valid_compile = 0
+            # sample_valid_compile, sample_valid_accuracy, sample_valid_correct, first_sample_valid_compile = evaluate_multi_step(model=model, dataset=valid_dataset,
+            #          batch_size=batch_size, do_sample=True, vocab=vocabulary, print_output=print_output,
+            #          max_sample_times=max_sample_times, file_path=compile_file_path)
             sample_test_compile, sample_test_accuracy, sample_test_correct, first_sample_test_compile = evaluate_multi_step(model=model, dataset=test_dataset,
                     batch_size=batch_size, do_sample=True, vocab=vocabulary, print_output=print_output,
                     max_sample_times=max_sample_times, file_path=compile_file_path)
@@ -1148,11 +1181,15 @@ if __name__ == '__main__':
     #                    epoch_ratio=0.25, normalize_type=None, atte_position_type='position', clip_norm=1, parallel=False,
     #                    do_sample_evaluate=True, print_output=True, logger_file_path='log/RNNPointerAllLossRecords.log')
 
-    train_and_evaluate(batch_size=12, hidden_size=400, num_heads=0, encoder_stack_num=0, decoder_stack_num=0, num_layers=3, dropout_p=0,
-                       learning_rate=6.25e-5, epoches=40, saved_name='RNNPointerAllLossWithContentEmbeddingCombineTrain.pkl', load_name='RNNPointerAllLossWithContentEmbeddingCombineTrain.pkl',
-                       epoch_ratio=0.25, normalize_type=None, atte_position_type='content', clip_norm=1, parallel=False,
-                       do_sample_evaluate=False, print_output=True, logger_file_path='log/RNNPointerAllLossWithContentEmbeddingCombineTrainMultiStepRecord.log',
-                       addition_train=True, addition_train_remain_frac=0.2, start_epoch=60, ac_copy_train=True, addition_epoch_ratio=0.4,
-                       ac_copy_radio=0.3, do_multi_step_evaluate=True, max_sample_times=5, compile_file_path='log/tmp_compile.c')
+    train_and_evaluate(batch_size=12, hidden_size=400, num_heads=0, encoder_stack_num=0, decoder_stack_num=0, num_layers=3,
+                       dropout_p=0, learning_rate=6.25e-5, epoches=40,
+                       saved_name='RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLoss.pkl',
+                       load_name='RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLoss.pkl',
+                       epoch_ratio=0.25, start_epoch=16, atte_position_type='content', clip_norm=1,
+                       parallel=False, do_sample_evaluate=False, print_output=True,
+                       logger_file_path='log/RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLossRecords.log',
+                       addition_train=False, addition_train_remain_frac=0.2, ac_copy_train=True,
+                       addition_epoch_ratio=0.4, ac_copy_radio=0.2, do_multi_step_evaluate=True, max_sample_times=5,
+                       compile_file_path='log/tmp_compile.c')
 
 
