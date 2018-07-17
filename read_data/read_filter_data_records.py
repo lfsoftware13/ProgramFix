@@ -1,6 +1,7 @@
 from read_data.read_data_from_db import read_train_data_effect_all_c_error_records, read_train_data_all_c_error_records, \
-    read_compile_success_c_records, read_fake_common_c_error_records, read_fake_random_c_error_records
-from common.util import disk_cache, compile_c_code_by_gcc_c89, group_df_to_grouped_list
+    read_compile_success_c_records, read_fake_common_c_error_records, read_fake_random_c_error_records, \
+    read_deepfix_records
+from common.util import disk_cache, compile_c_code_by_gcc_c89, group_df_to_grouped_list, init_code
 from common.constants import CACHE_DATA_PATH
 
 
@@ -121,7 +122,17 @@ def read_distinct_problem_user_fake_c_common_records():
     return data_df
 
 
+@disk_cache(basename='read_deepfix_error_records', directory=CACHE_DATA_PATH)
+def read_deepfix_error_records():
+    test_df = read_deepfix_records()
+    test_df = test_df[test_df['errorcount'].map(lambda x: x > 0)]
+    test_df['code'] = test_df['code'].map(init_code)
+    # test_df['code'] = test_df['code'].map(replace_include_with_blank)
+    print('original length: {}'.format(len(test_df)))
+    return test_df
+
+
 if __name__ == '__main__':
     # df = read_distinct_problem_user_ac_c_records_filter_error_code()
-    df = read_read_distinct_problem_user_c_records_less_10_error_and_c89()
+    df = read_deepfix_error_records()
     print(len(df))

@@ -25,7 +25,6 @@ import time
 
 from sklearn.utils import shuffle
 
-from common.action_constants import ActionType
 from common.new_tokenizer import tokenize
 
 
@@ -872,6 +871,19 @@ def remove_blank(code):
     mat = re.findall(pattern, code)
     processed_code = ' '.join(mat)
     return processed_code
+
+
+def create_token_set(one_ids, vocab):
+    total_set = set(one_ids)
+    total_set = total_set | vocab.special_token_ids
+    return total_set
+
+
+def create_token_mask_by_token_set(token_set, vocab_len):
+    mask = [0 for i in range(vocab_len)]
+    for t in token_set:
+        mask[t] = 1
+    return mask
 
 
 # ------------------ lex token util method ----------------------- #

@@ -5,6 +5,7 @@ from common.constants import verdict, langdict, scrapyOJ_DB_PATH, CACHE_DATA_PAT
     ACTUAL_C_ERROR_RECORDS, COMPILE_SUCCESS_DATA_DBPATH, C_COMPILE_SUCCESS_RECORDS, FAKE_C_COMPILE_ERROR_DATA_DBPATH, \
     COMMON_C_ERROR_RECORDS, RANDOM_C_ERROR_RECORDS
 from common.util import disk_cache
+from config import DEEPFIX_DB
 
 
 def merge_and_deal_submit_table(problems_df, submit_df):
@@ -120,4 +121,16 @@ def read_fake_random_c_error_records():
     conn = sqlite3.connect('file:{}?mode=ro'.format(FAKE_C_COMPILE_ERROR_DATA_DBPATH), uri=True)
     data_df = read_data(conn, RANDOM_C_ERROR_RECORDS)
     return data_df
+
+
+@disk_cache(basename='read_deepfix_records', directory=CACHE_DATA_PATH)
+def read_deepfix_records():
+    con = sqlite3.connect("file:{}?mode=ro".format(DEEPFIX_DB), uri=True)
+    test_df = pd.read_sql('select * from {}'.format('Code'), con)
+    return test_df
+
+
+if __name__ == '__main__':
+    df = read_deepfix_records()
+    print(len(df))
 

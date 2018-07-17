@@ -1,6 +1,7 @@
 from common.pycparser_util import tokenize_by_clex_fn
 from read_data.read_filter_data_records import read_distinct_problem_user_compile_success_c_records, \
-    read_distinct_problem_user_fake_c_common_records, read_distinct_problem_user_fake_c_random_records, read_distinct_problem_user_c_records
+    read_distinct_problem_user_fake_c_common_records, read_distinct_problem_user_fake_c_random_records, \
+    read_distinct_problem_user_c_records, read_deepfix_error_records
 from common.util import disk_cache, filter_length
 from common.constants import CACHE_DATA_PATH
 
@@ -65,6 +66,12 @@ def read_fake_random_c_error_dataset_with_limit_length(limit_length=500):
 
     train, valid, test = [filter_length(df, limit_length, tokenize_fn) for df in dfs]
     return train, valid, test
+
+
+@disk_cache(basename='read_deepfix_error_data', directory=CACHE_DATA_PATH)
+def read_deepfix_error_data():
+    df = read_deepfix_error_records()
+    return df
 
 
 if __name__ == '__main__':

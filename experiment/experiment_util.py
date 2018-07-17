@@ -6,7 +6,7 @@ from common.pycparser_util import tokenize_by_clex_fn
 from common.util import disk_cache
 from experiment.parse_xy_util import parse_error_tokens_and_action_map, parse_test_tokens, parse_output_and_position_map
 from read_data.load_data_vocabulary import create_common_error_vocabulary
-from read_data.read_experiment_data import read_fake_common_c_error_dataset_with_limit_length
+from read_data.read_experiment_data import read_fake_common_c_error_dataset_with_limit_length, read_deepfix_error_data
 
 import pandas as pd
 
@@ -103,6 +103,24 @@ def load_common_error_data_sample_100():
     return train_dict, valid_dict, test_dict
 
 
+@disk_cache(basename='load_deepfix_error_data', directory=CACHE_DATA_PATH)
+def load_deepfix_error_data():
+    vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>',
+                                           addition_tokens=['<GAP>'])
+    df = read_deepfix_error_data()
+    df = convert_deepfix_to_c_code(df)
+
+    tokenize_fn = tokenize_by_clex_fn()
+    parse_test_param = [vocab, tokenize_fn]
+    df_data = parse_test_tokens(df, 'deepfix', *parse_test_param)
+
+    df = df.loc[df_data.index.values]
+
+    deepfix_dict = {'error_code_word_id': df_data, 'includes': df['includes'], 'distance': df['errorcount']}
+    return deepfix_dict
+
+
+# ---------------------------------- addition train dataset --------------------------------------- #
 def create_addition_error_data(records):
     error_code_word_ids = [rec['error_code_word_id'] for rec in records]
     ac_code_word_ids = [rec['ac_code_word_id'] for rec in records]
@@ -164,6 +182,18 @@ def convert_c_code_fields_to_cpp_fields(df):
     return df
 
 
+def convert_deepfix_to_c_code(df):
+    filter_macro_fn = lambda code: not (code.find('define') != -1 or code.find('defined') != -1 or
+                                        code.find('undef') != -1 or code.find('pragma') != -1 or
+                                        code.find('ifndef') != -1 or code.find('ifdef') != -1 or
+                                        code.find('endif') != -1)
+    df['includes'] = df['code'].map(extract_include)
+    df['code_with_include'] = df['code']
+    df['code'] = df['code_with_include'].map(replace_include_with_blank)
+    df = df[df['code'].map(filter_macro_fn)]
+    return df
+
+
 def action_list_sorted(action_list):
     INSERT = 1
     def sort_key(a):
@@ -172,3 +202,10 @@ def action_list_sorted(action_list):
 
     action_list = sorted(action_list, key=sort_key, reverse=True)
     return action_list
+
+if __name__ == '__main__':
+    data_dict = load_deepfix_error_data()
+    print(data_dict['error_code_word_id'].iloc[0])
+    print(data_dict['includes'].iloc[0])
+    print(data_dict['distance'].iloc[0])
+    print(len(data_dict['error_code_word_id']))
