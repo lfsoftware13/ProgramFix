@@ -8,15 +8,18 @@ import torch.nn.functional as F
 import pandas as pd
 from torch.utils.data import Dataset
 from tqdm import tqdm
+import numpy as np
+import more_itertools
 
 import config
-from common import torch_util
+from common import torch_util, util
 from common.args_util import to_cuda, get_model
 from common.logger import init_a_file_logger, info
 from common.opt import OpenAIAdam
+from common.pycparser_util import tokenize_by_clex_fn
 from common.torch_util import create_sequence_length_mask, permute_last_dim_to_second, expand_tensor_sequence_len
 from common.util import data_loader, show_process_map, PaddedList, convert_one_token_ids_to_code, filter_token_ids, \
-    compile_c_code_by_gcc, create_token_set, create_token_mask_by_token_set
+    compile_c_code_by_gcc, create_token_set, create_token_mask_by_token_set, generate_mask
 from experiment.experiment_util import load_common_error_data, load_common_error_data_sample_100, \
     create_addition_error_data, create_copy_addition_data, load_deepfix_error_data
 from experiment.parse_xy_util import parse_output_and_position_map
@@ -24,13 +27,14 @@ from model.base_attention import TransformEncoderModel, TransformDecoderModel, T
     register_hook, PositionWiseFeedForwardNet, is_nan, record_is_nan
 from read_data.load_data_vocabulary import create_common_error_vocabulary
 from seq2seq.models import EncoderRNN, DecoderRNN
+from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
 from vocabulary.word_vocabulary import Vocabulary
 from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens
 
 
 MAX_LENGTH = 500
 IGNORE_TOKEN = -1
-is_debug = False
+is_debug = True
 
 
 class CCodeErrorDataSet(Dataset):
@@ -144,49 +148,6 @@ def create_pointer_map(ac_length, token_map):
     return pointer_map
 
 
-# class SinCosPositionEmbeddingModel(nn.Module):
-#     def __init__(self, min_timescale=1.0, max_timescale=1.0e4):
-#         super(SinCosPositionEmbeddingModel, self).__init__()
-#         self.min_timescale = min_timescale
-#         self.max_timescale = max_timescale
-#
-#     def forward(self, x, position_start_list=None):
-#         """
-#
-#         :param x: has more than 3 dims
-#         :param position_start_list: len(position_start_list) == len(x.shape) - 2. default: [0] * num_dims.
-#                 create position from start to start+length-1 for each dim.
-#         :param min_timescale:
-#         :param max_timescale:
-#         :return:
-#         """
-#         x_shape = list(x.shape)
-#         num_dims = len(x_shape) - 2
-#         channels = x_shape[-1]
-#         num_timescales = channels // (num_dims * 2)
-#         log_timescales_increment = (math.log(float(self.max_timescale) / float(self.min_timescale)) / (float(num_timescales) - 1))
-#         inv_timescales = self.min_timescale * to_cuda(torch.exp(torch.range(0, num_timescales - 1) * -log_timescales_increment))
-#         # add moved position start index
-#         if position_start_list is None:
-#             position_start_list = [0] * num_dims
-#         for dim in range(num_dims):
-#             length = x_shape[dim + 1]
-#             # position = transform_to_cuda(torch.range(0, length-1))
-#             # create position from start to start+length-1 for each dim
-#             position = to_cuda(torch.range(position_start_list[dim], position_start_list[dim] + length - 1))
-#             scaled_time = torch.unsqueeze(position, 1) * torch.unsqueeze(inv_timescales, 0)
-#             signal = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)
-#             prepad = dim * 2 * num_timescales
-#             postpad = channels - (dim + 1) * 2 * num_timescales
-#             signal = F.pad(signal, (prepad, postpad, 0, 0))
-#             for _ in range(dim + 1):
-#                 signal = torch.unsqueeze(signal, dim=0)
-#             for _ in range(num_dims - dim - 1):
-#                 signal = torch.unsqueeze(signal, dim=-2)
-#             x += signal
-#         return x
-
-
 class IndexPositionEmbedding(nn.Module):
     def __init__(self, vocabulary_size, hidden_size, max_len):
         super(IndexPositionEmbedding, self).__init__()
@@ -221,89 +182,10 @@ class IndexPositionEmbedding(nn.Module):
         embedded_input = self.embedding(inputs)
         return embedded_input
 
-# class SelfAttentionPointerNetworkModel(nn.Module):
-#     def __init__(self, vocabulary_size, hidden_size, encoder_stack_num, decoder_stack_num, start_label, end_label, dropout_p=0.1, num_heads=2, normalize_type=None, MAX_LENGTH=500):
-#         super(SelfAttentionPointerNetworkModel, self).__init__()
-#         self.vocabulary_size = vocabulary_size
-#         self.hidden_size = hidden_size
-#         self.encoder_stack_num = encoder_stack_num
-#         self.decoder_stack_num = decoder_stack_num
-#         self.start_label = start_label
-#         self.end_label = end_label
-#         self.dropout_p = dropout_p
-#         self.num_heads = num_heads
-#         self.normalize_type = normalize_type
-#         self.MAX_LENGTH = MAX_LENGTH
-#
-#         # self.encode_embedding = nn.Embedding(vocabulary_size, hidden_size//2)
-#         # self.encode_position_embedding = SinCosPositionEmbeddingModel()
-#         self.encode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
-#         # self.decode_embedding = nn.Embedding(vocabulary_size, hidden_size//2)
-#         # self.decode_position_embedding = SinCosPositionEmbeddingModel()
-#         self.decode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
-#
-#         self.encoder = TransformEncoderModel(hidden_size=self.hidden_size, encoder_stack_num=self.encoder_stack_num, dropout_p=self.dropout_p, num_heads=self.num_heads, normalize_type=self.normalize_type)
-#         self.decoder = TransformDecoderModel(hidden_size=hidden_size, decoder_stack_num=self.decoder_stack_num, dropout_p=self.dropout_p, num_heads=self.num_heads, normalize_type=self.normalize_type)
-#
-#         # self.copy_linear = nn.Linear(self.hidden_size, 1)
-#         self.copy_linear = PositionWiseFeedForwardNet(input_size=self.hidden_size, hidden_size=self.hidden_size,
-#                                                       output_size=1, hidden_layer_count=1)
-#
-#         # self.position_pointer = TrueMaskedMultiHeaderAttention(hidden_size=self.hidden_size, num_heads=1, attention_type='scaled_dot_product')
-#         # self.position_pointer = nn.Linear(self.hidden_size, self.hidden_size)
-#         self.position_pointer = PositionWiseFeedForwardNet(self.hidden_size, self.hidden_size, self.hidden_size//2, 1)
-#         # self.output_linear = nn.Linear(self.hidden_size, self.vocabulary_size)
-#         self.output_linear = PositionWiseFeedForwardNet(input_size=self.hidden_size, hidden_size=self.hidden_size,
-#                                                       output_size=vocabulary_size, hidden_layer_count=1)
-#
-#     def create_next_output(self, copy_output, value_output, pointer_output, input):
-#         """
-#
-#         :param copy_output: [batch, sequence, dim**]
-#         :param value_output: [batch, sequence, dim**, vocabulary_size]
-#         :param pointer_output: [batch, sequence, dim**, encode_length]
-#         :param input: [batch, encode_length, dim**]
-#         :return: [batch, sequence, dim**]
-#         """
-#         is_copy = (copy_output > 0.5)
-#         _, top_id = torch.topk(F.softmax(value_output, dim=-1), k=1, dim=-1)
-#         _, pointer_pos_in_input = torch.topk(F.softmax(pointer_output, dim=-1), k=1, dim=-1)
-#         point_id = torch.gather(input, dim=-1, index=pointer_pos_in_input.squeeze(dim=-1))
-#         next_output = torch.where(is_copy, point_id, top_id.squeeze(dim=-1))
-#         return next_output
-#
-#     def decode_step(self, decode_input, decode_mask, encode_value, encode_mask, position_embedded):
-#         # record_is_nan(encode_value, 'encode_value')
-#         decoder_output = self.decoder(decode_input, decode_mask, encode_value, encode_mask)
-#         # record_is_nan(decoder_output, 'decoder_output')
-#
-#         is_copy = F.sigmoid(self.copy_linear(decoder_output).squeeze(dim=-1))
-#         # record_is_nan(is_copy, 'is_copy in model: ')
-#         pointer_ff = self.position_pointer(decoder_output)
-#         # record_is_nan(pointer_ff, 'pointer_ff in model: ')
-#         pointer_output = torch.bmm(pointer_ff, torch.transpose(position_embedded, dim0=-1, dim1=-2))
-#         # record_is_nan(pointer_output, 'pointer_output in model: ')
-#         if encode_mask is not None:
-#             dim_len = len(pointer_output.shape)
-#             pointer_output.masked_fill_(~encode_mask.view(encode_mask.shape[0], *[1 for i in range(dim_len-2)], encode_mask.shape[-1]), -float('inf'))
-#             # pointer_output = torch.where(torch.unsqueeze(encode_mask, dim=1), pointer_output, to_cuda(torch.Tensor([float('-inf')])))
-#
-#         value_output = self.output_linear(decoder_output)
-#         return is_copy, value_output, pointer_output
-#
-#     def forward(self, input, input_mask, output, output_mask):
-#         position_input = self.encode_position_embedding(input, input_mask)
-#         position_input_embedded = self.encode_position_embedding.forward_position(input, input_mask)
-#         encode_value = self.encoder(position_input, input_mask)
-#
-#         position_output = self.decode_position_embedding(output, output_mask)
-#         is_copy, value_output, pointer_output = self.decode_step(position_output, output_mask, encode_value, input_mask,
-#                                                                  position_embedded=position_input_embedded)
-#         return is_copy, value_output, pointer_output
 
-class RNNPointerNetworkModel(nn.Module):
-    def __init__(self, vocabulary_size, hidden_size, num_layers, start_label, end_label, dropout_p=0.1, MAX_LENGTH=500, atte_position_type='position'):
-        super(RNNPointerNetworkModel, self).__init__()
+class RNNPointerNetworkModelWithSLKMask(nn.Module):
+    def __init__(self, vocabulary_size, hidden_size, num_layers, start_label, end_label, dropout_p=0.1, MAX_LENGTH=500, atte_position_type='position', mask_transformer=None):
+        super(RNNPointerNetworkModelWithSLKMask, self).__init__()
         self.vocabulary_size = vocabulary_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -312,6 +194,9 @@ class RNNPointerNetworkModel(nn.Module):
         self.dropout_p = dropout_p
         self.MAX_LENGTH = MAX_LENGTH
         self.atte_position_type = atte_position_type
+
+        self.mask_transformer = mask_transformer
+
 
         self.encode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
         self.decode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
@@ -375,12 +260,31 @@ class RNNPointerNetworkModel(nn.Module):
         value_output = self.output_linear(decoder_output)
         if value_mask is not None:
             dim_len = len(value_output.shape)
-            value_output.masked_fill_(~value_mask.view(value_mask.shape[0], *[1 for i in range(dim_len - 2)], value_mask.shape[-1]), -float('inf'))
+            value_output.data.masked_fill_(~value_mask.view(value_mask.shape[0], *[1 for i in range(dim_len - 3)], *value_mask.shape[-2:]), -float('inf'))
         return is_copy, value_output, pointer_output, hidden
 
-    def forward(self, inputs, input_mask, output, output_mask, value_mask=None, test=False):
+    def forward(self, inputs, input_mask, output, output_mask, output_list, value_mask=None, test=False):
         if test:
             return self.forward_test(inputs, input_mask, value_mask=value_mask)
+
+        # output_length = to_cuda(torch.sum(output_mask, dim=-1))
+        # output_token_length = output_length - 2
+        print('vocabulary size: ', self.vocabulary_size)
+        value_mask = self.mask_transformer.get_all_token_mask_train(ac_tokens_ids=output_list, ac_length=None, start_pos=1)
+        flatten_mask = []
+        print('after get_all_token_mask_train')
+        for v in value_mask:
+            flatten_mask += v
+        print('after create flatten_mask: {}'.format(len(flatten_mask)))
+        # flatten_mask = list(more_itertools.flatten(value_mask))
+        # paddded_mask = PaddedList(value_mask, shape=[output.shape[0], output.shape[1] - 1], fill_value=generate_mask([], size=self.vocabulary_size))
+        # print('paddded_mask shape: {}'.format(paddded_mask.shape))
+        value_mask = to_cuda(torch.ByteTensor(flatten_mask))
+        print('after create tensor')
+        # np_mask = np.array(paddded_mask)
+        # value_mask = to_cuda(torch.ByteTensor(PaddedList(value_mask, shape=[output.shape[0], output.shape[1]-1, self.vocabulary_size])))
+        value_mask = None
+
         position_input = self.encode_position_embedding(inputs, input_mask)
         if self.atte_position_type == 'position':
             encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
@@ -467,6 +371,10 @@ def parse_input_batch_data(batch_data):
 
 
 def parse_rnn_input_batch_data(batch_data, vocab, do_sample=False, add_value_mask=False):
+    ac_tokens_length = [len(bat) for bat in batch_data['ac_tokens']]
+    _, idx_sort = torch.sort(torch.LongTensor(ac_tokens_length), dim=0, descending=True)
+    batch_data = {k: util.index_select(v, idx_sort) for k, v in batch_data.items()}
+
     error_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['error_tokens'])))
     max_input = max(batch_data['error_length'])
     input_mask = to_cuda(create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['error_length'])), max_len=max_input))
@@ -481,6 +389,7 @@ def parse_rnn_input_batch_data(batch_data, vocab, do_sample=False, add_value_mas
     else:
         ac_tokens = None
         output_mask = None
+        ac_tokens_decoder_input = None
 
     if add_value_mask:
         token_sets = [create_token_set(one, vocab) for one in batch_data['error_tokens']]
@@ -498,10 +407,14 @@ def parse_rnn_input_batch_data(batch_data, vocab, do_sample=False, add_value_mas
     # info('ac_length: {}'.format(batch_data['ac_length']))
 
     # return error_tokens, input_mask, ac_tokens, output_mask
-    return error_tokens, input_mask, ac_tokens, output_mask, token_mask_tensor
+    return error_tokens, input_mask, ac_tokens, output_mask, ac_tokens_decoder_input, token_mask_tensor
 
 
 def parse_target_batch_data(batch_data):
+    ac_tokens_length = [len(bat) for bat in batch_data['ac_tokens']]
+    _, idx_sort = torch.sort(torch.LongTensor(ac_tokens_length), dim=0, descending=True)
+    batch_data = {k: util.index_select(v, idx_sort) for k, v in batch_data.items()}
+
     ac_tokens_decoder_output = [bat[1:] for bat in batch_data['ac_tokens']]
     target_ac_tokens = to_cuda(torch.LongTensor(PaddedList(ac_tokens_decoder_output, fill_value=IGNORE_TOKEN)))
 
@@ -1122,13 +1035,17 @@ def train_and_evaluate(batch_size, hidden_size, data_type, num_layers, dropout_p
         # combine_base_train_set = combine_base_train_set.combine_dataset(ac_copy_dataset)
     addition_dataset = None
 
+    tokenize_fn = tokenize_by_clex_fn()
+    mask_transformer = TransformVocabularyAndSLK(vocabulary, tokenize_fn)
+
     # model = SelfAttentionPointerNetworkModel(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
     #                                  encoder_stack_num=encoder_stack_num, decoder_stack_num=decoder_stack_num,
     #                                  start_label=begin_tokens_id[0], end_label=end_tokens_id[0], dropout_p=dropout_p,
     #                                  num_heads=num_heads, normalize_type=normalize_type, MAX_LENGTH=MAX_LENGTH)
-    model = RNNPointerNetworkModel(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
+    model = RNNPointerNetworkModelWithSLKMask(vocabulary_size=vocabulary.vocabulary_size, hidden_size=hidden_size,
                                      num_layers=num_layers, start_label=begin_tokens_id[0], end_label=end_tokens_id[0],
-                                   dropout_p=dropout_p, MAX_LENGTH=MAX_LENGTH, atte_position_type=atte_position_type)
+                                   dropout_p=dropout_p, MAX_LENGTH=MAX_LENGTH, atte_position_type=atte_position_type,
+                                   mask_transformer=mask_transformer)
     print('model atte_position_type: {}'.format(atte_position_type))
 
     model = get_model(model)
@@ -1251,12 +1168,12 @@ if __name__ == '__main__':
     #                    epoch_ratio=0.25, normalize_type=None, atte_position_type='position', clip_norm=1, parallel=False,
     #                    do_sample_evaluate=True, print_output=True, logger_file_path='log/RNNPointerAllLossRecords.log')
 
-    train_params = {'batch_size': 12, 'data_type': 'deepfix', 'learning_rate': 6.25e-5, 'epoches': 40,
-                    'epoch_ratio': 0.25, 'start_epoch': 0, 'clip_norm': 1,
-                    'do_sample_evaluate': False, 'print_output': True, 'addition_train': False,
+    train_params = {'batch_size': 2, 'data_type': 'common', 'learning_rate': 6.25e-5, 'epoches': 40,
+                    'epoch_ratio': 1, 'start_epoch': 0, 'clip_norm': 1,
+                    'do_sample_evaluate': False, 'print_output': False, 'addition_train': False,
                     'addition_train_remain_frac': 0.2, 'addition_epoch_ratio': 0.4,
                     'ac_copy_train': False, 'ac_copy_radio': 0.2,
-                    'do_multi_step_evaluate': True, 'max_sample_times': 10, 'compile_file_path': 'log/tmp_compile.c'}
+                    'do_multi_step_evaluate': False, 'max_sample_times': 10, 'compile_file_path': 'log/tmp_compile.c'}
 
 
     # train_and_evaluate(batch_size=12, hidden_size=400, data_type='deepfix',
@@ -1271,13 +1188,13 @@ if __name__ == '__main__':
     #                    compile_file_path='log/tmp_compile.c', add_value_mask=False, multi_step_no_target=True)
 
     model_params1 = {'hidden_size': 400, 'num_layers': 3, 'dropout_p': 0, 'atte_position_type': 'content',
-                     'add_value_mask': True,
+                     'add_value_mask': False,
                      }
 
-    save_params1 = {'saved_name': 'RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLossWithTokenMask.pkl',
-                    'load_name': 'RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLossWithTokenMask.pkl',
-                    # 'load_name': None,
-                    'logger_file_path': 'log/RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLossWithTokenMaskDeepfix.log',
+    save_params1 = {'saved_name': 'RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLossSLKMask.pkl',
+                    # 'load_name': 'RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLossSLKMask.pkl',
+                    'load_name': None,
+                    'logger_file_path': 'log/RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLossSLKMask.log',
                     }
 
     # train_and_evaluate(batch_size=12, hidden_size=400, data_type='deepfix', num_layers=3,

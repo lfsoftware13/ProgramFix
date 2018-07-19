@@ -8,9 +8,13 @@ class AModel(nn.Module):
         super(AModel, self).__init__()
         self.hidden_size = hidden_size
         self.affine = nn.Linear(hidden_size, hidden_size)
+        self.binary_out = nn.Linear(hidden_size, 1)
 
     def forward(self, inputs):
         out = self.affine(inputs)
+        binary = self.binary_out(out)
+        sig_value = torch.sigmoid(binary)
+        label = sig_value > 0.5
         return out
 
 class BModel(nn.Module):
@@ -67,6 +71,17 @@ def need_batch_first():
     print(unpacked.shape)
 
 
+def model_cuda_test():
+    m = AModel(2)
+    a = [[2, 2],
+         [2, 2]]
+    res = m.forward(torch.Tensor(a))
+
+
+def test_fn(x, y, z):
+    return x+y+z
+
+
 if __name__ == '__main__':
     # loss_function = nn.CrossEntropyLoss()
     # model = BModel(2)
@@ -79,7 +94,11 @@ if __name__ == '__main__':
     # model.zero_grad()
     # print(model)
 
-    need_batch_first()
+    # need_batch_first()
+    # model_cuda_test()
+    v = {'x': 1, 'y': 2, 'z': 3}
+    res = test_fn(v)
+    print(res)
 
     # a = [3, 6]
     # c = Categorical(torch.Tensor(a))

@@ -426,5 +426,6 @@ operator_map = {
 
 pre_defined_c_tokens = set(keyword_map.values()) | set(operator_map.values())
 pre_defined_c_tokens_map = {**keyword_map, **operator_map}
+pre_defined_c_label = set(pre_defined_c_tokens_map.keys())
 
 pre_defined_c_library_tokens = c_standard_library_defined_identifier | c_standard_library_defined_types

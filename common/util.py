@@ -746,6 +746,7 @@ class MaskList(collections.Sequence):
     def __init__(self, length, default_value):
         self._length = length
         self._default_value = default_value
+        self._label_value = 1 - default_value
         self._mask_segment = []
 
     def __getitem__(self, i: int):
@@ -758,22 +759,17 @@ class MaskList(collections.Sequence):
         return self._length
 
     def __iter__(self):
-        mask_index = 0
-        for i in range(len(self)):
-            while True:
-                if mask_index >= len(self._mask_segment):
+        cur_pos = 0
+        for a, b in self._mask_segment:
+            if cur_pos < a:
+                for i in range(a-cur_pos):
                     yield self._default_value
-                    break
-                elif i < self._mask_segment[mask_index][0]:
-                    yield self._default_value
-                    break
-                elif self._mask_segment[mask_index][0] <= i <= self._mask_segment[mask_index][1]:
-                    yield 1 - self._default_value
-                    break
-                elif i > self._mask_segment[mask_index][1]:
-                    mask_index += 1
-                    continue
-
+            for i in range(b-a+1):
+                yield self._label_value
+            cur_pos = b+1
+        if cur_pos < self._length:
+            for i in range(self._length-cur_pos):
+                yield self._default_value
 
     def set_mask(self, begin, end=None):
         if end is None:
@@ -782,6 +778,7 @@ class MaskList(collections.Sequence):
 
     def flip(self):
         self._default_value = 1 - self._default_value
+        self._label_value = 1 - self._default_value
         return self
 
     def sort(self):
@@ -941,3 +938,9 @@ def iterate_directory(root_path, extensions=None, recursive=False):
                         or ((isinstance(extensions, list) or isinstance(extensions, tuple)) and extension_name in extensions) \
                         or (isinstance(extensions, str) and extensions == extension_name):
                     yield os.path.join(dir_path, file), file
+
+
+if __name__ == '__main__':
+    mask = generate_mask([], 4)
+    a = [m for m in mask]
+    print(a)
