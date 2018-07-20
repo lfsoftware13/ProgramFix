@@ -435,6 +435,31 @@ def data_loader(dataset, batch_size, is_shuffle=True, drop_last=False, epoch_rat
         yield toolz.merge_with(lambda x:x, batch)
 
 
+_end_object = "<END>"
+
+
+def _inner_queue_data_loader(queue, dataset, batch_size, is_shuffle=True, drop_last=False, epoch_ratio=1.0):
+    for batch_data in data_loader(dataset, batch_size, is_shuffle=is_shuffle, drop_last=drop_last, epoch_ratio=epoch_ratio):
+        queue.put(batch_data)
+    queue.put(_end_object)
+
+
+def queued_data_loader(dataset, batch_size, is_shuffle=True, drop_last=False, epoch_ratio=1.0,
+                       queue_size=20):
+    import multiprocessing as mp
+    from multiprocessing import Queue
+    from multiprocessing import Process
+    q = Queue(maxsize=queue_size)
+    p = mp.Process(target=_inner_queue_data_loader, args=(q, dataset, batch_size, is_shuffle,
+                                                          drop_last, epoch_ratio))
+    p.start()
+    while True:
+        t = q.get()
+        if t == _end_object:
+            break
+        else:
+            yield t
+
 # ---------------------------------- PaddedList ------------------------------------------- #
 
 class PaddedList(collections.Sequence):
