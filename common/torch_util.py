@@ -300,5 +300,18 @@ def expand_tensor_sequence_len(t, max_len, fill_value=0):
     return res_t
 
 
+def expand_tensor_sequence_to_same(t1, t2, fill_value=0):
+    len1 = t1.shape[1]
+    len2 = t2.shape[1]
+    expand_len = max(len1, len2)
+    t1 = expand_tensor_sequence_len(t1, expand_len, fill_value)
+    t2 = expand_tensor_sequence_len(t2, expand_len, fill_value)
+    return t1, t2
+
+
+def expand_output_and_target_sequence_len(model_output, model_target, fill_value=0):
+    res = [expand_tensor_sequence_to_same(out, tar, fill_value=fill_value) for out, tar in zip(model_output, model_target)]
+    return list(zip(*res))
+
 if __name__ == '__main__':
     a = []
