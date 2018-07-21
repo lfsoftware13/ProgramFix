@@ -202,7 +202,7 @@ class IndexPositionEmbedding(nn.Module):
         position_input_index = to_cuda(
             torch.unsqueeze(torch.arange(start_index, start_index + input_sequence_len), dim=0).expand(batch_size, -1)).long()
         if input_mask is not None:
-            position_input_index = position_input_index.masked_fill_(~input_mask, MAX_LENGTH)
+            position_input_index.masked_fill_(~input_mask, MAX_LENGTH)
         position_input_embedded = self.position_embedding(position_input_index)
         position_input = torch.cat([position_input_embedded, embedded_input], dim=-1)
         return position_input
@@ -213,7 +213,7 @@ class IndexPositionEmbedding(nn.Module):
         position_input_index = to_cuda(
             torch.unsqueeze(torch.arange(0, input_sequence_len), dim=0).expand(batch_size, -1)).long()
         if input_mask is not None:
-            position_input_index = position_input_index.masked_fill_(~input_mask, MAX_LENGTH)
+            position_input_index.masked_fill_(~input_mask, MAX_LENGTH)
         position_input_embedded = self.position_embedding(position_input_index)
         return position_input_embedded
 

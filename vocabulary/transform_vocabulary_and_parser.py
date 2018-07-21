@@ -1,17 +1,20 @@
+import copy
+
+import torch
+
 from c_parser.slk_parser import PackedDynamicSLKParser
 from common.constants import pre_defined_c_tokens, pre_defined_c_tokens_map, pre_defined_c_label, \
     pre_defined_c_library_tokens, CACHE_DATA_PATH
 from common.logger import info
-from common.pycparser_util import transform_LexToken_list, transform_LexToken
+from common.pycparser_util import transform_LexToken_list, transform_LexToken, tokenize_by_clex_fn
 from common.util import create_token_mask_by_token_set, disk_cache, generate_mask
+from read_data.load_data_vocabulary import create_common_error_vocabulary
 
 
 class TransformVocabularyAndSLK(object):
 
     def __init__(self, vocab, tokenize_fn):
         self.vocab = vocab
-
-        self.tokenize_fn = tokenize_fn
         self.string_vocabulary_set = create_string_vocabulary_set(vocab, tokenize_fn)
         self.constant_vocabulary_set = create_constant_vocabulary_set(vocab, tokenize_fn)
         self.id_vocabulary_set = create_id_vocabulary_set(vocab, tokenize_fn)
@@ -31,7 +34,7 @@ class TransformVocabularyAndSLK(object):
         return code_ids
 
     def filter_code_ids_python(self, code_ids):
-        code_ids = [ids[1:-1] for ids in code_ids]
+        code_ids = [ids[:] for ids in code_ids]
         return code_ids
 
     def parse_ids_to_code(self, code_ids_list):
@@ -39,10 +42,10 @@ class TransformVocabularyAndSLK(object):
         codes = [' '.join(v_list) for v_list in code_values]
         return codes
 
-    def create_tokens_list(self, code_list):
-        tokens_list = [self.tokenize_fn(code) for code in code_list]
-        tokens_list = [transform_LexToken_list(tokens) for tokens in tokens_list]
-        return tokens_list
+    # def create_tokens_list(self, code_list):
+    #     tokens_list = [self.tokenize_fn(code) for code in code_list]
+    #     tokens_list = [transform_LexToken_list(tokens) for tokens in tokens_list]
+    #     return tokens_list
 
     def create_id_constant_string_set_id_by_ids(self, code_ids):
         total_set = set(code_ids)
@@ -52,10 +55,10 @@ class TransformVocabularyAndSLK(object):
         return id_set, string_set, constant_set
 
     def convert_slk_type_to_token_set(self, slk_type, id_set, string_set, constant_set):
-        total_id_set = set()
+        total_id_set = {self.vocab.word_to_id(self.vocab.unk)}
         if 'END_OF_SLK_INPUT' in slk_type:
             total_id_set |= self.end_label_vocabulary_set
-        if 'ID' in slk_type:
+        if 'ID' in slk_type or 'TYPEID' in slk_type:
             total_id_set |= id_set
             total_id_set |= self.pre_defined_c_library_set
         if 'STRING_LITERAL' in slk_type:
@@ -67,7 +70,12 @@ class TransformVocabularyAndSLK(object):
             if t in self.keyword_vocabulary_dict.keys():
                 keyword_set |= {self.keyword_vocabulary_dict[t]}
         total_id_set |= keyword_set
-        return total_id_set
+        if len(total_id_set) == 1:
+            keyword_set = {v for v in self.keyword_vocabulary_dict.values()}
+            total_id_set = id_set | self.pre_defined_c_library_set | string_set | constant_set | keyword_set
+            # print('token set mask is empty')
+            # info('token set mask is empty')
+        return list(sorted(list(total_id_set)))
 
     def get_slk_result(self, tokens):
         slk_res = []
@@ -75,11 +83,15 @@ class TransformVocabularyAndSLK(object):
             slk_res = self.parser.get_all_compatible_token(tokens)
         except Exception as e:
             slk_res = [[] for i in range(len(tokens)+1)]
-            print(e)
+            # print(e)
             info(str(e))
             tokens_str = ' '.join([tok.value for tok in tokens])
-            print(tokens_str)
+            # print(tokens_str)
             info(tokens_str)
+            info([tok.type for tok in tokens])
+            # print(tokens_str)
+            # print([tok.type for tok in tokens])
+            raise Exception('slk error')
         return slk_res
 
     def create_token_mask(self, s):
@@ -91,12 +103,15 @@ class TransformVocabularyAndSLK(object):
         mask = generate_mask(s, size=self.vocab.vocabulary_size)
         return mask
 
-    def get_all_token_mask_train(self, ac_tokens_ids, ac_length, start_pos=0):
-        # token_ids_list = self.filter_code_ids(ac_tokens_ids, ac_length, start_pos=start_pos)
-        token_ids_list = self.filter_code_ids_python(ac_tokens_ids)
+    def get_all_token_mask_train(self, ac_tokens_ids, ac_length=None, start_pos=0):
+        if isinstance(ac_tokens_ids, torch.Tensor):
+            token_ids_list = self.filter_code_ids(ac_tokens_ids, ac_length, start_pos=start_pos)
+        else:
+            # token_ids_list = self.filter_code_ids_python(ac_tokens_ids)
+            token_ids_list = ac_tokens_ids
         combine_result = [self.create_id_constant_string_set_id_by_ids(token_ids) for token_ids in token_ids_list]
         id_set_list, string_set_list, constant_set_list = list(zip(*combine_result))
-        tokens_list = [[self.id_to_token_dict[i] for i in token_ids] for token_ids in token_ids_list]
+        tokens_list = [[copy.copy(self.id_to_token_dict[i]) for i in token_ids] for token_ids in token_ids_list]
         # codes_list = self.parse_ids_to_code(token_ids_list)
         # tokens_list = self.create_tokens_list(codes_list)
         slk_result_list = [self.get_slk_result(tokens) for tokens in tokens_list]
@@ -105,9 +120,30 @@ class TransformVocabularyAndSLK(object):
             for slk_result, id_set, string_set, constant_set in
             zip(slk_result_list, id_set_list, string_set_list, constant_set_list)]
 
-        token_id_mask = [[self.create_token_mask(s) for s in id_sets]
-                         for id_sets in token_id_set]
-        return token_id_mask
+        # token_id_mask = [[self.create_token_mask(s) for s in id_sets]
+        #                  for id_sets in token_id_set]
+        # return token_id_mask
+        # end_id = 30598
+        # for one_ac_tokens, token_ids, id_set, string_set, constant_set, slk_result in \
+        #         zip(ac_tokens_ids, token_id_set, id_set_list, string_set_list, constant_set_list, slk_result_list):
+        #     for tok, id_mask, slk_res in zip(one_ac_tokens + [end_id], token_ids, slk_result):
+        #         if tok not in id_mask:
+        #             pass
+                    # print('id {} not in mask {}'.format(tok, id_mask))
+                    # print('ac_token_id: {}'.format(one_ac_tokens))
+                    # print('token_mask: {}'.format(token_ids))
+                    # print('id_set: {}'.format(id_set))
+                    # print('string_set: {}'.format(string_set))
+                    # print('constant_set: {}'.format(constant_set))
+                    # print('slk_res: {}'.format(slk_res))
+
+        return token_id_set
+
+    def create_new_slk_iterator(self):
+        return self.parser.new()
+
+    def get_candicate_step(self, t_parser):
+        return next(t_parser)
 
 
 @disk_cache(basename='create_string_vocabulary_set', directory=CACHE_DATA_PATH)
@@ -174,7 +210,6 @@ def create_ids_to_token_dict(vocab, tokenize_fn):
                 info('vocabulary tokenize length is {}'.format(len(tokens)))
     tok = tokenize_fn('unk')[0]
     id_to_token_dict[vocab.word_to_id(vocab.unk)] = transform_LexToken(tok)
-    print('vocabulary: ', vocab.id_to_word(30600))
     return id_to_token_dict
 
 
@@ -195,6 +230,34 @@ def create_special_type_vocabulary_mask(vocab, tokenize_fn, labels):
                 ids += [i]
     token_set = set(ids)
     return token_set
+
+
+if __name__ == '__main__':
+    begin_tokens = ['<BEGIN>']
+    end_tokens = ['<END>']
+    unk_token = '<UNK>'
+    addition_tokens = ['<GAP>']
+    vocabulary = create_common_error_vocabulary(begin_tokens=begin_tokens, end_tokens=end_tokens, unk_token=unk_token,
+                                                addition_tokens=addition_tokens)
+    tokenize_fn = tokenize_by_clex_fn()
+    transformer = TransformVocabularyAndSLK(vocabulary, tokenize_fn)
+
+
+    code = r'''
+         int main ( ) { char x [ 99 ] , y [ 99 ] , z [ 99 ] ; int i = 0 , l1 , l2 ; int k , l , u , B ; scanf ( "%s %s" , x , y ) ; l1 = strlen ( x ) ; l2 = strlen ( y ) ; if ( l1 == l2 ) { for ( i = 0 ; i < l1 ; i ++ ) { if ( x [ i ] >= 97 && x [ i ] <= 122 && y [ i ] >= 97 && y [ i ] <= 122 ) { if ( x [ i ] < y [ i ] ) { B = - 1 ; break ; } else if ( x [ i ] > y [ i ] ) { z [ i ] = y [ i ] ; } else if ( x [ i ] == y [ i ] ) { l = x [ i ] ; u = 122 ; srand ( ( unsigned ) time ( NULL ) ) ; z [ i ] = l + rand ( ) % ( u - l + 1 ) ; } } } } if ( B == - 1 ) { printf ( "%d" , B ) ; } else { printf ( "%s" , z ) ; } return 0 ; }
+         '''
+    name_list = [tok.value for tok in tokenize_fn(code)]
+    ids_list = vocabulary.parse_text_without_pad([name_list])
+    print(ids_list)
+    transformer.get_all_token_mask_train(ids_list)
+
+    id_to_token_dict = create_ids_to_token_dict(vocabulary, tokenize_fn)
+    u_id = vocabulary.word_to_id(end_tokens[0])
+    word = vocabulary.id_to_word(10394)
+    print('end_id: {}'.format(u_id))
+    # print('u id : {}, u token: {}'.format(u_id, id_to_token_dict[u_id]))
+
+    print('word:{},token:{}'.format(word, id_to_token_dict[10394]))
 
 
 

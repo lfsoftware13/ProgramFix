@@ -13,7 +13,7 @@ class ValueToken:
         self.lexpos = lexpos
 
     def __str__(self):
-        return 'ValueToken(%s,%r,%d,%d)' % (self.type, self.value, self.lineno, self.lexpos)
+        return 'ValToken(%s,%r,%d,%d)' % (self.type, self.value, self.lineno, self.lexpos)
 
     def __repr__(self):
         return str(self)

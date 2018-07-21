@@ -439,8 +439,11 @@ _end_object = "<END>"
 
 
 def _inner_queue_data_loader(queue, dataset, batch_size, is_shuffle=True, drop_last=False, epoch_ratio=1.0):
+    t = 0
     for batch_data in data_loader(dataset, batch_size, is_shuffle=is_shuffle, drop_last=drop_last, epoch_ratio=epoch_ratio):
         queue.put(batch_data)
+        print("{}th pre parsed".format(t))
+        t+=1
     queue.put(_end_object)
 
 
@@ -453,8 +456,11 @@ def queued_data_loader(dataset, batch_size, is_shuffle=True, drop_last=False, ep
     p = mp.Process(target=_inner_queue_data_loader, args=(q, dataset, batch_size, is_shuffle,
                                                           drop_last, epoch_ratio))
     p.start()
+    i = 0
     while True:
         t = q.get()
+        print("get {}th batch data".format(i))
+        i+=1
         if t == _end_object:
             break
         else:
