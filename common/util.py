@@ -24,6 +24,7 @@ import collections
 import time
 
 from sklearn.utils import shuffle
+from torch.utils.data import Dataset
 
 from common.new_tokenizer import tokenize
 
@@ -969,6 +970,65 @@ def iterate_directory(root_path, extensions=None, recursive=False):
                         or ((isinstance(extensions, list) or isinstance(extensions, tuple)) and extension_name in extensions) \
                         or (isinstance(extensions, str) and extensions == extension_name):
                     yield os.path.join(dir_path, file), file
+
+
+class CustomerDataSet(Dataset):
+
+    def __init__(self,
+                 data_df: pd.DataFrame,
+                 vocabulary,
+                 set_type: str,
+                 transform=None,
+                 no_filter=False):
+        super().__init__(data_df, vocabulary, set_type, transform, no_filter)
+        self.set_type = set_type
+        self.transform = transform
+        self.vocabulary = vocabulary
+        if data_df is not None:
+            if not no_filter:
+                self.data_df = self.filter_df(data_df)
+            else:
+                self.data_df = data_df
+            self._samples = [row for i, row in self.data_df.iterrows()]
+            if self.transform:
+                self._samples = show_process_map(self.transform, self._samples)
+            # for s in self._samples:
+            #     for k, v in s.items():
+            #         print("{}:shape {}".format(k, np.array(v).shape))
+
+    def filter_df(self, df):
+        raise NotImplementedError
+
+    def _get_raw_sample(self, row):
+        raise NotImplementedError
+
+    def add_samples(self, df):
+        df = self.filter_df(df)
+        self._samples += [row for i, row in df.iterrows()]
+
+    def remain_samples(self, count=0, frac=1.0):
+        if count != 0:
+            self._samples = random.sample(self._samples, count)
+        elif frac != 1:
+            count = int(len(self._samples) * frac)
+            self._samples = random.sample(self._samples, count)
+
+    def combine_dataset(self, dataset):
+        d = CustomerDataSet(data_df=None, vocabulary=self.vocabulary, set_type=self.set_type, transform=self.transform)
+        d._samples = self._samples + dataset._samples
+        return d
+
+    def remain_dataset(self, count=0, frac=1.0):
+        d = CustomerDataSet(data_df=None, vocabulary=self.vocabulary, set_type=self.set_type, transform=self.transform)
+        d._samples = self._samples
+        d.remain_samples(count=count, frac=frac)
+        return d
+
+    def __getitem__(self, index):
+        return self._get_raw_sample(self._samples[index])
+
+    def __len__(self):
+        return len(self._samples)
 
 
 if __name__ == '__main__':
