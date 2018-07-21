@@ -372,6 +372,7 @@ if __name__ == '__main__':
     save_name = p_config['save_name']
     parse_input_batch_data_fn = p_config['parse_input_batch_data_fn']
     parse_target_batch_data_fn = p_config['parse_target_batch_data_fn']
+    expand_output_and_target_fn = p_config.get('expand_output_and_target_fn', None)
     create_output_ids_fn = p_config['create_output_ids_fn']
     model_path = os.path.join(save_root_path, p_config['load_model_name'])
     model = get_model(

@@ -4,7 +4,7 @@ from common.opt import OpenAIAdam
 from common.pycparser_util import tokenize_by_clex_fn
 from model.one_pointer_copy_self_attention_seq2seq_model_gammar_mask_refactor import \
     create_parse_rnn_input_batch_data_fn, create_parse_target_batch_data, create_combine_loss_fn, create_output_ids, \
-    load_dataset, RNNPointerNetworkModelWithSLKMask
+    load_dataset, RNNPointerNetworkModelWithSLKMask, slk_expand_output_and_target
 from read_data.load_data_vocabulary import create_common_error_vocabulary
 from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
 
@@ -56,6 +56,7 @@ def test_config1(is_debug):
         'transformer': transformer,
         'parse_input_batch_data_fn': parse_rnn_input_batch_data,
         'parse_target_batch_data_fn': parse_target_batch_data,
+        'expand_output_and_target_fn': slk_expand_output_and_target,
         'create_output_ids_fn': create_output_id_fn,
         'train_loss': loss_fn,
         'evaluate_object_list': [SLKOutputAccuracyAndCorrect(ignore_token=-1)],
