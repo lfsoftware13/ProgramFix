@@ -1604,6 +1604,7 @@ class DynamicSLKPaserTokensWrapper(object):
         self.tokens = tokens
         self.action = action
         self.once = False
+        self.iter_parser = self.parser.parse(self.tokens, self.action)
 
     def add_token(self, token):
         self.tokens.add_token(token)
@@ -1612,7 +1613,10 @@ class DynamicSLKPaserTokensWrapper(object):
         if self.once:
             raise Exception("This object can only be used once")
         self.once = True
-        return self.parser.parse(self.tokens, self.action)
+        return self
+
+    def __next__(self):
+        return next(self.iter_parser)
 
 
 class PackedDynamicSLKParser(object):

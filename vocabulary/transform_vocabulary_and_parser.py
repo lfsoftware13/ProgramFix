@@ -129,8 +129,9 @@ class TransformVocabularyAndSLK(object):
 
         # id_set, string_set, constant_set = self.create_id_constant_string_set_id_by_ids(previous_token_ids)
 
-        token = copy.copy(self.id_to_token_dict[token_id])
-        t_parser.add_token(token)
+        if token_id is not None:
+            token = copy.copy(self.id_to_token_dict[token_id])
+            t_parser.add_token(token)
         slk_result = next(t_parser)
         token_id_list = self.convert_slk_type_to_token_set(slk_result, *previous_id_set_list)
         return token_id_list

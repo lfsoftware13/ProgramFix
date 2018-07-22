@@ -980,7 +980,7 @@ class CustomerDataSet(Dataset):
                  set_type: str,
                  transform=None,
                  no_filter=False):
-        super().__init__(data_df, vocabulary, set_type, transform, no_filter)
+        super().__init__()
         self.set_type = set_type
         self.transform = transform
         self.vocabulary = vocabulary
