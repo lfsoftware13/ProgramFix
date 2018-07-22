@@ -120,30 +120,20 @@ class TransformVocabularyAndSLK(object):
             for slk_result, id_set, string_set, constant_set in
             zip(slk_result_list, id_set_list, string_set_list, constant_set_list)]
 
-        # token_id_mask = [[self.create_token_mask(s) for s in id_sets]
-        #                  for id_sets in token_id_set]
-        # return token_id_mask
-        # end_id = 30598
-        # for one_ac_tokens, token_ids, id_set, string_set, constant_set, slk_result in \
-        #         zip(ac_tokens_ids, token_id_set, id_set_list, string_set_list, constant_set_list, slk_result_list):
-        #     for tok, id_mask, slk_res in zip(one_ac_tokens + [end_id], token_ids, slk_result):
-        #         if tok not in id_mask:
-        #             pass
-                    # print('id {} not in mask {}'.format(tok, id_mask))
-                    # print('ac_token_id: {}'.format(one_ac_tokens))
-                    # print('token_mask: {}'.format(token_ids))
-                    # print('id_set: {}'.format(id_set))
-                    # print('string_set: {}'.format(string_set))
-                    # print('constant_set: {}'.format(constant_set))
-                    # print('slk_res: {}'.format(slk_res))
-
         return token_id_set
 
     def create_new_slk_iterator(self):
         return self.parser.new()
 
-    def get_candicate_step(self, t_parser):
-        return next(t_parser)
+    def get_candicate_step(self, t_parser, token_id, previous_id_set_list):
+
+        # id_set, string_set, constant_set = self.create_id_constant_string_set_id_by_ids(previous_token_ids)
+
+        token = copy.copy(self.id_to_token_dict[token_id])
+        t_parser.add_token(token)
+        slk_result = next(t_parser)
+        token_id_list = self.convert_slk_type_to_token_set(slk_result, *previous_id_set_list)
+        return token_id_list
 
 
 @disk_cache(basename='create_string_vocabulary_set', directory=CACHE_DATA_PATH)
