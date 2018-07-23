@@ -15,7 +15,7 @@ MAX_TOKEN_LENGTH = 500
 
 
 @disk_cache(basename='load_common_error_data', directory=CACHE_DATA_PATH)
-def load_common_error_data():
+def load_common_error_data(addition_infomation=False):
     vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>', addition_tokens=['<GAP>'])
     train, vaild, test = read_fake_common_c_error_dataset_with_limit_length(MAX_TOKEN_LENGTH)
     train = convert_c_code_fields_to_cpp_fields(train)
@@ -46,6 +46,12 @@ def load_common_error_data():
     test_dict = {'error_code_word_id': test_data[0], 'ac_code_word_id': test_data[1], 'token_map': test_data[2],
                  'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4],
                  'pointer_map': test_data[5], 'distance': test_data[6]}
+
+    if addition_infomation:
+        train_dict = add_c_common_code_original_info(data_dict=train_dict, df=train)
+        valid_dict = add_c_common_code_original_info(data_dict=valid_dict, df=vaild)
+        test_dict = add_c_common_code_original_info(data_dict=test_dict, df=test)
+
     # valid_dict = {'error_code_word_id': vaild_data, 'includes': vaild['includes']}
     # test_dict = {'error_code_word_id': test_data, 'includes': test['includes']}
 
@@ -57,7 +63,7 @@ def load_common_error_data():
 
 
 # @disk_cache(basename='load_common_error_data_sample_100', directory=CACHE_DATA_PATH)
-def load_common_error_data_sample_100():
+def load_common_error_data_sample_100(addition_infomation=False):
     vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>', addition_tokens=['<GAP>'])
     train, vaild, test = read_fake_common_c_error_dataset_with_limit_length(MAX_TOKEN_LENGTH)
     train = convert_c_code_fields_to_cpp_fields(train)
@@ -92,6 +98,11 @@ def load_common_error_data_sample_100():
     test_dict = {'error_code_word_id': test_data[0], 'ac_code_word_id': test_data[1], 'token_map': test_data[2],
                  'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4],
                  'pointer_map': test_data[5], 'distance': test_data[6]}
+
+    if addition_infomation:
+        train_dict = add_c_common_code_original_info(data_dict=train_dict, df=train)
+        valid_dict = add_c_common_code_original_info(data_dict=valid_dict, df=vaild)
+        test_dict = add_c_common_code_original_info(data_dict=test_dict, df=test)
     # valid_dict = {'error_code_word_id': vaild_data, 'includes': vaild['includes']}
     # test_dict = {'error_code_word_id': test_data, 'includes': test['includes']}
 
@@ -101,6 +112,16 @@ def load_common_error_data_sample_100():
     # print(train_data[0])
 
     return train_dict, valid_dict, test_dict
+
+
+def add_c_common_code_original_info(data_dict, df):
+    data_dict['id'] = df['id']
+    data_dict['problem_id'] = df['problem_id']
+    data_dict['user_id'] = df['user_id']
+    data_dict['problem_user_id'] = df['problem_user_id']
+    data_dict['code'] = df['code']
+    data_dict['similar_code'] = df['similar_code']
+    return data_dict
 
 
 @disk_cache(basename='load_deepfix_error_data', directory=CACHE_DATA_PATH)

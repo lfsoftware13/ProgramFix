@@ -313,5 +313,55 @@ def expand_output_and_target_sequence_len(model_output, model_target, fill_value
     res = [expand_tensor_sequence_to_same(out, tar, fill_value=fill_value) for out, tar in zip(model_output, model_target)]
     return list(zip(*res))
 
+
+class DynamicDecoder(object):
+    def __init__(self, start_label, end_label, pad_label, decoder_fn, create_next_output_fn, max_length):
+        self.start_label = start_label
+        self.end_label = end_label
+        self.pad_label = pad_label
+        self.decoder_fn = decoder_fn
+        self.create_next_output_fn = create_next_output_fn
+        self.max_length = max_length
+
+    def decoder(self, encoder_output, endocer_hidden, encoder_mask, **kwargs):
+        batch_size = encoder_output.shape[0]
+        continue_mask = to_cuda(torch.ByteTensor([1 for i in range(batch_size)]))
+        outputs = to_cuda(torch.LongTensor([[self.start_label] for i in range(batch_size)]))
+        decoder_output_list = []
+        outputs_list = []
+        hidden = endocer_hidden
+        error_list = [0 for i in range(batch_size)]
+        
+        for i in range(self.max_length):
+            one_step_decoder_output, hidden, error_ids = self.decoder_fn(outputs, continue_mask, start_index=i, hidden=hidden,
+                                                              encoder_output=encoder_output,
+                                                              encoder_mask=encoder_mask,
+                                                              **kwargs)
+            if len(error_ids) is not None:
+                for err in error_ids:
+                    error_list[err] = 1
+            decoder_output_list += [one_step_decoder_output]
+
+            outputs = self.create_next_output_fn(one_step_decoder_output, **kwargs)
+            outputs_list += [outputs]
+            step_continue = torch.ne(outputs, self.end_label).view(outputs.shape[0])
+            continue_mask = continue_mask & step_continue
+
+            if torch.sum(continue_mask&~to_cuda(torch.ByteTensor(error_list))) == 0:
+                break
+        return decoder_output_list, outputs_list, error_list
+
+
+def pad_last_dim_of_tensor_list(tensor_list, max_len=None, fill_value=0):
+    total_len = [tensor.shape[-1] for tensor in tensor_list]
+    if max_len is None:
+        total_len = [tensor.shape[-1] for tensor in tensor_list]
+        max_len = max(total_len)
+
+    padded_tensor_list = [F.pad(tensor, (0, max_len-one_len), 'constant', fill_value) for tensor, one_len in zip(tensor_list, total_len)]
+    return padded_tensor_list
+
+
+
 if __name__ == '__main__':
     a = []

@@ -1,7 +1,10 @@
-from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens
+from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens, SLK_SAMPLE_DBPATH, \
+    SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME
 from common.evaluate_util import SLKOutputAccuracyAndCorrect
 from common.opt import OpenAIAdam
 from common.pycparser_util import tokenize_by_clex_fn
+from model.one_pointer_copy_self_attention_seq2seq_model_gammar_mask_refactor import load_sample_save_dataset, \
+    create_save_sample_data
 from read_data.load_data_vocabulary import create_common_error_vocabulary
 from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
 
@@ -32,7 +35,8 @@ def test_config1(is_debug):
     parse_target_batch_data = create_parse_target_batch_data()
     create_output_id_fn = create_output_ids
     loss_fn = create_combine_loss_fn(average_value=True)
-    datasets = load_dataset(is_debug, vocabulary, mask_transformer=transformer)
+    # datasets = load_dataset(is_debug, vocabulary, mask_transformer=transformer)
+    datasets = load_sample_save_dataset(is_debug, vocabulary, mask_transformer=transformer)
 
     epoches=40
     train_len = len(datasets[0])
@@ -42,8 +46,7 @@ def test_config1(is_debug):
     return {
         'name': 'test',
         'save_name': 'test.pkl',
-        'load_model_name': 'test.pkl',
-        'logger_file_path': 'test.log',
+        'load_model_name': 'RNNPointerAllLossWithContentEmbeddingCombineTrainWeightCopyLossSLKMask.pkl',
 
         'model_fn': RNNPointerNetworkModelWithSLKMask,
         'model_dict': {'vocabulary_size': vocabulary.vocabulary_size, 'hidden_size': 400,
@@ -54,7 +57,7 @@ def test_config1(is_debug):
         'do_sample_evaluate': False,
 
         'vocabulary': vocabulary,
-        'transformer': transformer,
+        # 'transformer': transformer,
         'parse_input_batch_data_fn': parse_rnn_input_batch_data,
         'parse_target_batch_data_fn': parse_target_batch_data,
         'expand_output_and_target_fn': slk_expand_output_and_target,
@@ -62,8 +65,13 @@ def test_config1(is_debug):
         'train_loss': loss_fn,
         'evaluate_object_list': [SLKOutputAccuracyAndCorrect(ignore_token=-1)],
 
-        'ac_copy_train': True,
+        'ac_copy_train': False,
         'ac_copy_radio': 0.2,
+
+        'do_sample_and_save': True,
+        'add_data_record_fn': create_save_sample_data(vocabulary),
+        'db_path': SLK_SAMPLE_DBPATH,
+        'table_basename': SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME,
 
         'epcohes': epoches,
         'start_epoch': 0,

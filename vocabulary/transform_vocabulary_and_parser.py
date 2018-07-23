@@ -55,7 +55,8 @@ class TransformVocabularyAndSLK(object):
         return id_set, string_set, constant_set
 
     def convert_slk_type_to_token_set(self, slk_type, id_set, string_set, constant_set):
-        total_id_set = {self.vocab.word_to_id(self.vocab.unk)}
+        # total_id_set = {self.vocab.word_to_id(self.vocab.unk)}
+        total_id_set = set()
         if 'END_OF_SLK_INPUT' in slk_type:
             total_id_set |= self.end_label_vocabulary_set
         if 'ID' in slk_type or 'TYPEID' in slk_type:
@@ -71,8 +72,9 @@ class TransformVocabularyAndSLK(object):
                 keyword_set |= {self.keyword_vocabulary_dict[t]}
         total_id_set |= keyword_set
         if len(total_id_set) == 1:
-            keyword_set = {v for v in self.keyword_vocabulary_dict.values()}
-            total_id_set = id_set | self.pre_defined_c_library_set | string_set | constant_set | keyword_set
+            pass
+            # keyword_set = {v for v in self.keyword_vocabulary_dict.values()}
+            # total_id_set = id_set | self.pre_defined_c_library_set | string_set | constant_set | keyword_set
             # print('token set mask is empty')
             # info('token set mask is empty')
         return list(sorted(list(total_id_set)))
@@ -133,6 +135,7 @@ class TransformVocabularyAndSLK(object):
             token = copy.copy(self.id_to_token_dict[token_id])
             t_parser.add_token(token)
         slk_result = next(t_parser)
+        # print(slk_result)
         token_id_list = self.convert_slk_type_to_token_set(slk_result, *previous_id_set_list)
         return token_id_list
 
@@ -244,7 +247,7 @@ if __name__ == '__main__':
 
     id_to_token_dict = create_ids_to_token_dict(vocabulary, tokenize_fn)
     u_id = vocabulary.word_to_id(end_tokens[0])
-    word = vocabulary.id_to_word(10394)
+    word = vocabulary.id_to_word(30600)
     print('end_id: {}'.format(u_id))
     # print('u id : {}, u token: {}'.format(u_id, id_to_token_dict[u_id]))
 
