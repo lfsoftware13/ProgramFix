@@ -1565,7 +1565,7 @@ class DynamicSLKParser(object):
         stack.append(start_symbol)
         token = tokens.get()
         if token is None:
-            print(self._label_vocabulary.get_symbol_name(start_symbol))
+            # print(self._label_vocabulary.get_symbol_name(start_symbol))
             yield self._slk_production_vocabulary.get_matched_terminal_node(start_symbol)
             token = tokens.get()
             assert token is not None
