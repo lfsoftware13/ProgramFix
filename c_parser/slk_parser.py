@@ -1600,7 +1600,6 @@ class DynamicSLKParser(object):
                     level += 1
                 if entry != 0:
                     index = self._sklconstants.production_row[entry]
-                    print(self._label_vocabulary.get_production_name(entry))
                     production_length = self._sklconstants.production_table[index] - 1
                     index += 1
                     lhs = self._sklconstants.production_table[index]
@@ -1619,7 +1618,6 @@ class DynamicSLKParser(object):
                     action.match_terminal_value(token, tokens.last_token_value())
                     token = tokens.get()
                     if token is None:
-                        print(self._label_vocabulary.get_symbol_name(stack[-1]))
                         yield self._slk_production_vocabulary.get_matched_terminal_node(stack[-1])
                         token = tokens.get()
                         assert token is not None
