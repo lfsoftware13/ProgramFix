@@ -1631,10 +1631,11 @@ class DynamicSLKParser(object):
 
 
 class DynamicSLKPaserTokensWrapper(object):
-    def __init__(self, parser: DynamicSLKParser, tokens: DynamicLexTokens, action: CAction):
+    def __init__(self, parser: DynamicSLKParser, tokens: DynamicLexTokens, action: CAction, label_vocabulary):
         self.parser = parser
         self.tokens = tokens
         self.action = action
+        self.label_vocabulary = label_vocabulary
         self.once = False
         self.iter_parser = self.parser.parse(self.tokens, self.action)
 
@@ -1648,7 +1649,9 @@ class DynamicSLKPaserTokensWrapper(object):
         return self
 
     def __next__(self):
-        return next(self.iter_parser)
+        t = next(self.iter_parser)
+        t_type = [self.label_vocabulary.get_label_by_id(tt) for tt in t]
+        return t_type
 
 
 class PackedDynamicSLKParser(object):
@@ -1666,7 +1669,7 @@ class PackedDynamicSLKParser(object):
         tokens = DynamicLexTokens(self.label_vocabulary, self.slk_constants)
         c_action = CAction(self.slk_constants, self.label_vocabulary, tokens)
         tokens.typedef_lookup_fn = c_action.type_lookup_fn
-        return DynamicSLKPaserTokensWrapper(self._dynamic_parser, tokens, c_action)
+        return DynamicSLKPaserTokensWrapper(self._dynamic_parser, tokens, c_action, self.label_vocabulary)
 
     def get_all_compatible_token(self, code):
         """

@@ -6,12 +6,11 @@ from tqdm import tqdm
 
 from common import torch_util, problem_util, util
 from common.logger import init_a_file_logger, info
-from common.opt import OpenAIAdam
 from common.problem_util import to_cuda
-from common.torch_util import expand_output_and_target_sequence_len, expand_tensor_sequence_len
 from common.util import data_loader
 import torch.functional as F
 
+from database.database_util import create_table, insert_items
 
 IGNORE_TOKEN = -1
 
@@ -24,7 +23,7 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     if parallel:
         m = nn.DataParallel(m.cuda(), device_ids=[0, 1])
     elif gpu_index is not None:
-        m = m.cuda(gpu_index)
+        m = nn.DataParallel(m.cuda(), device_ids=[gpu_index])
     if load_previous:
         torch_util.load_model(m, path)
         print("load previous model")
@@ -165,6 +164,120 @@ def evaluate(model, dataset, batch_size, loss_function, parse_input_batch_data_f
     return evaluate_obj_list, (total_loss / steps).item()
 
 
+def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch_data_fn, parse_target_batch_data_fn,
+             do_sample=False, print_output=False, create_output_ids_fn=None, evaluate_obj_list=[],
+             expand_output_and_target_fn=None, add_data_record_fn=None, db_path='', table_name=''):
+    # total_loss = to_cuda(torch.Tensor([0]))
+    total_batch = to_cuda(torch.Tensor([0]))
+    saved_count = 0
+    steps = 1
+    for o in evaluate_object_list:
+        o.clear_result()
+    model.eval()
+
+    total_saved_list = []
+
+    with tqdm(total=len(dataset)) as pbar:
+        with torch.no_grad():
+            for batch_data in data_loader(dataset, batch_size=batch_size, drop_last=True):
+                model.zero_grad()
+
+                # model_input = parse_input_batch_data(batch_data)
+                model_input = parse_input_batch_data_fn(batch_data, do_sample=do_sample)
+                # model_output = model.forward(*model_input, test=do_sample)
+                if do_sample:
+                    model_output = model.forward(*model_input, test=True)
+
+                    model_target = parse_target_batch_data_fn(batch_data)
+
+                    model_output, model_target = expand_output_and_target_fn(model_output, model_target)
+                else:
+                    model_output = model.forward(*model_input)
+                    model_target = parse_target_batch_data_fn(batch_data)
+
+                # loss = loss_function(*model_output, *model_target)
+
+                output_ids = create_output_ids_fn(model_output, model_input)
+                # total_loss += loss
+                total_batch += batch_size
+
+                # step_output = 'in evaluate step {}  loss: {}, '.format(steps, loss.data.item())
+                step_output = 'in evaluate step {} '.format(steps)
+                for evaluator in evaluate_obj_list:
+                    res = evaluator.add_result(output_ids, model_output, model_target, model_input, batch_data=batch_data)
+                    step_output += res
+                # print(step_output)
+                info(step_output)
+
+                saved_list = add_data_record_fn(output_ids, model_output, batch_data)
+                total_saved_list += saved_list
+
+                if steps % 100 == 0:
+                    create_table(db_path, table_name)
+                    insert_items(db_path, table_name, total_saved_list)
+                    saved_count += len(total_saved_list)
+                    print('saved {} record in total {}. '.format(saved_count, total_batch.item()))
+                    total_saved_list = []
+
+                if print_output and steps % 100 == 0:
+                    pass
+                    # output_ids = output_ids.tolist()
+                    # target_ids = batch_data['ac_tokens']
+                    # is_copy = (is_copy > 0.5).tolist()
+                    # target_is_copy = target_is_copy.tolist()
+                    # value_output = torch.squeeze(torch.topk(F.softmax(value_output, dim=-1), k=1, dim=-1)[1], dim=-1)
+                    # value_output = value_output.tolist()
+                    # target_ac_tokens = target_ac_tokens.tolist()
+                    # pointer_output = torch.squeeze(torch.topk(F.softmax(pointer_output, dim=-1), k=1, dim=-1)[1], dim=-1)
+                    # pointer_output = pointer_output.tolist()
+                    # target_pointer_output = target_pointer_output.tolist()
+                    # target_length = torch.sum(output_mask, dim=-1)
+                    # target_length = target_length.tolist()
+                    # for out, tar, cop, tar_cop, val, tar_val, poi, tar_poi, tar_len in zip(output_ids, target_ids, is_copy,
+                    #                                                               target_is_copy, value_output,
+                    #                                                               target_ac_tokens,
+                    #                                                               pointer_output,
+                    #                                                               target_pointer_output, target_length):
+                    # # for out, tar,  in zip(output_ids, target_ids):
+                    #     out_code, end_pos = convert_one_token_ids_to_code(out, id_to_word_fn=vocab.id_to_word, start=start_id,
+                    #                                          end=end_id, unk=unk_id)
+                    #     tar_code, tar_end_pos = convert_one_token_ids_to_code(tar[1:], id_to_word_fn=vocab.id_to_word, start=start_id,
+                    #                                          end=end_id, unk=unk_id)
+                    #     info('-------------- step {} ------------------------'.format(steps))
+                    #     info('output: {}'.format(out_code))
+                    #     info('target: {}'.format(tar_code))
+                    #     cop = [str(c) for c in cop]
+                    #     tar_cop = [str(int(c)) for c in tar_cop]
+                    #     poi = [str(c) for c in poi]
+                    #     tar_poi = [str(c) for c in tar_poi]
+                    #     info('copy output: {}'.format(' '.join(cop[:tar_len])))
+                    #     info('copy target: {}'.format(' '.join(tar_cop[:tar_len])))
+                    #     info('pointer output: {}'.format(' '.join(poi[:tar_len])))
+                    #     info('pointer target: {}'.format(' '.join(tar_poi[:tar_len])))
+                    #
+                    #     value_list = []
+                    #     target_list = []
+                    #     for c, v, t in zip(tar_cop, val, tar_val):
+                    #         if c == '1':
+                    #             value_list += ['<COPY>']
+                    #             target_list += ['<COPY>']
+                    #         else:
+                    #             value_list += [vocab.id_to_word(int(v))]
+                    #             target_list += [vocab.id_to_word(int(t))]
+                    #     info('value output: {}'.format(' '.join(value_list[:tar_len])))
+                    #     info('value target: {}'.format(' '.join(target_list[:tar_len])))
+
+                steps += 1
+                pbar.update(batch_size)
+
+    create_table(db_path, table_name)
+    insert_items(db_path, table_name, total_saved_list)
+    saved_count += len(total_saved_list)
+    print('saved {} record in total {}. '.format(saved_count, total_batch.item()))
+
+    return evaluate_obj_list
+
+
 def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dataset, ac_copy_dataset,
                        learning_rate, epoches, saved_name, train_loss_fn, optimizer, optimizer_dict,
                        parse_input_batch_data_fn, parse_target_batch_data_fn,
@@ -173,7 +286,9 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        do_sample_evaluate=False, print_output=False, expand_output_and_target_fn=None,
                        addition_train=False, addition_train_remain_frac=1.0, addition_epoch_ratio=0.4,
                        start_epoch=0, ac_copy_train=False, ac_copy_radio=1.0,
-                       do_multi_step_evaluate=False, max_sample_times=1, compile_file_path=None, multi_step_no_target=False):
+                       do_sample_and_save=False, db_path=None, table_basename=None,
+                       do_multi_step_evaluate=False, max_sample_times=1, compile_file_path=None, multi_step_no_target=False,
+                       add_data_record_fn=None):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -196,16 +311,62 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
     if load_previous:
         # valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
         #                                       loss_function=loss_fn, vocab=vocabulary, add_value_mask=add_value_mask)
-        test_evaluator, test_loss = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
-                                             loss_function=train_loss_fn, do_sample=False,
-                                             parse_input_batch_data_fn=parse_input_batch_data_fn,
-                                             parse_target_batch_data_fn=parse_target_batch_data_fn,
-                                             create_output_ids_fn=create_output_ids_fn,
-                                             evaluate_obj_list=evaluate_obj_list,
-                                             expand_output_and_target_fn=expand_output_and_target_fn)
-        print('previous test loss: {}, evaluator : '.format(test_loss))
-        for evaluator in test_evaluator:
-            print(evaluator)
+        # test_evaluator, test_loss = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+        #                                      loss_function=train_loss_fn, do_sample=False,
+        #                                      parse_input_batch_data_fn=parse_input_batch_data_fn,
+        #                                      parse_target_batch_data_fn=parse_target_batch_data_fn,
+        #                                      create_output_ids_fn=create_output_ids_fn,
+        #                                      evaluate_obj_list=evaluate_obj_list,
+        #                                      expand_output_and_target_fn=expand_output_and_target_fn)
+        # print('previous test loss: {}, evaluator : '.format(test_loss))
+        # for evaluator in test_evaluator:
+        #     print(evaluator)
+
+        if do_sample_and_save:
+            sample_and_save_evalutor = sample_and_save(model=model, dataset=test_dataset, batch_size=batch_size,
+                                                       loss_function=train_loss_fn, do_sample=True,
+                                                       print_output=print_output,
+                                                       parse_input_batch_data_fn=parse_input_batch_data_fn,
+                                                       parse_target_batch_data_fn=parse_target_batch_data_fn,
+                                                       create_output_ids_fn=create_output_ids_fn,
+                                                       evaluate_obj_list=evaluate_obj_list,
+                                                       expand_output_and_target_fn=expand_output_and_target_fn,
+                                                       add_data_record_fn=add_data_record_fn,
+                                                       db_path=db_path, table_name=table_basename+'_train')
+            print('sample and save evaluator : '.format(sample_test_loss))
+            for evaluator in sample_and_save_evalutor:
+                print(evaluator)
+
+            sample_and_save_evalutor = sample_and_save(model=model, dataset=valid_dataset, batch_size=batch_size,
+                                                       loss_function=train_loss_fn, do_sample=True,
+                                                       print_output=print_output,
+                                                       parse_input_batch_data_fn=parse_input_batch_data_fn,
+                                                       parse_target_batch_data_fn=parse_target_batch_data_fn,
+                                                       create_output_ids_fn=create_output_ids_fn,
+                                                       evaluate_obj_list=evaluate_obj_list,
+                                                       expand_output_and_target_fn=expand_output_and_target_fn,
+                                                       add_data_record_fn=add_data_record_fn,
+                                                       db_path=db_path, table_name=table_basename+'_valid')
+            print('sample and save evaluator : '.format(sample_test_loss))
+            for evaluator in sample_and_save_evalutor:
+                print(evaluator)
+
+            sample_and_save_evalutor = sample_and_save(model=model, dataset=train_dataset, batch_size=batch_size,
+                                                       loss_function=train_loss_fn, do_sample=True,
+                                                       print_output=print_output,
+                                                       parse_input_batch_data_fn=parse_input_batch_data_fn,
+                                                       parse_target_batch_data_fn=parse_target_batch_data_fn,
+                                                       create_output_ids_fn=create_output_ids_fn,
+                                                       evaluate_obj_list=evaluate_obj_list,
+                                                       expand_output_and_target_fn=expand_output_and_target_fn,
+                                                       add_data_record_fn=add_data_record_fn,
+                                                       db_path=db_path,
+                                                       table_name=table_basename+'_test')
+            print('sample and save evaluator : '.format(sample_test_loss))
+            for evaluator in sample_and_save_evalutor:
+                print(evaluator)
+            return
+
         if do_multi_step_evaluate:
             pass
             # sample_valid_compile = 0
@@ -361,6 +522,7 @@ if __name__ == '__main__':
     ac_copy_radio = p_config.get('ac_copy_radio', 0.2)
     evaluate_object_list = p_config.get("evaluate_object_list")
     do_sample_evaluate = p_config.get('do_sample_evaluate', False)
+    do_sample_and_save = p_config.get('do_sample_and_save', False)
     # label_preprocess_fn = p_config.get("label_preprocess", lambda x: to_cuda(torch.LongTensor(x['label'])))
     # scheduler_fn = p_config.get("scheduler_fn", lambda x: torch.optim.lr_scheduler.ReduceLROnPlateau(x, 'min', patience=3, verbose=True))
     save_root_path = os.path.join(config.save_model_root, p_config.get("name"))
@@ -373,6 +535,9 @@ if __name__ == '__main__':
     parse_input_batch_data_fn = p_config['parse_input_batch_data_fn']
     parse_target_batch_data_fn = p_config['parse_target_batch_data_fn']
     expand_output_and_target_fn = p_config.get('expand_output_and_target_fn', None)
+    add_data_record_fn = p_config.get('add_data_record_fn', None)
+    db_path = p_config.get('db_path', None)
+    table_basename = p_config.get('table_basename', None)
     create_output_ids_fn = p_config['create_output_ids_fn']
     model_path = os.path.join(save_root_path, p_config['load_model_name'])
     model = get_model(
@@ -398,7 +563,10 @@ if __name__ == '__main__':
                        do_sample_evaluate=do_sample_evaluate, print_output=False,
                        ac_copy_train=ac_copy_train, ac_copy_radio=ac_copy_radio,
                        addition_train=False, addition_train_remain_frac=1.0, addition_epoch_ratio=0.4,
-                       do_multi_step_evaluate=False, max_sample_times=1, compile_file_path=None, multi_step_no_target=False)
+                       do_multi_step_evaluate=False, max_sample_times=1, compile_file_path=None, multi_step_no_target=False,
+                       expand_output_and_target_fn=expand_output_and_target_fn,
+                       do_sample_and_save=do_sample_and_save, add_data_record_fn=add_data_record_fn, db_path=db_path,
+                       table_basename=table_basename)
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)
