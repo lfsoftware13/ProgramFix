@@ -1434,22 +1434,45 @@ def monitored_slk_parse(code, clex, predefined_identifer, predefined_typename, v
 class SLKProductionVocabulary(ProductionVocabulary):
     def __init__(self, slk_constants):
         self._slk_constants = slk_constants
+        self._label_vocabulary = C99LabelVocabulary(slk_constants)
+        self._terminal_cache={}
         self._non_terminal_compact_dict = self._get_all_compact_id()
+        del self._terminal_cache
         self._confilict_compact_dicct = {}
 
-    def _get_token_type_from_entry(self, entry,):
+    def _get_token_type_from_entry(self, entry, token):
         START_CONFLICT = self._slk_constants.START_CONFLICT
         start_symbol = self._slk_constants.START_SYMBOL
         res = [False, False]
+        # print("to find entry:{}".format(entry))
         if entry >= START_CONFLICT:
+            # print("need find conflict")
             index = self._slk_constants.conflict_row[entry - (START_CONFLICT - 1)]
             for t in range(1, start_symbol):
+                # print("search symbol {} of {}".format(self._label_vocabulary.get_symbol_name(t), t))
                 entry = self._slk_constants.conflict_table[index + t]
-                res = [a or b for a, b in zip(self._get_token_type_from_entry(entry), res)]
+                res = [a or b for a, b in zip(self._get_token_type_from_entry(entry, token), res)]
         elif entry != 0:
             index = self._slk_constants.production_row[entry]
             production_length = self._slk_constants.production_table[index] - 1
-            res[int(production_length != 0)] = True
+            assert production_length >= 0
+            if production_length == 0:
+                res[0] = True
+            else:
+                index += 2
+                tmp = [True, False]
+                for i in range(production_length):
+                    next_symbol = self._slk_constants.production_table[index+i]
+                    if self._slk_constants.is_action(next_symbol):
+                        continue
+                    t = self._get_token_type(next_symbol, token)
+                    tmp[0] = tmp[0] and t[0]
+                    tmp[1] = tmp[1] or t[1]
+                    if t[1]:
+                        break
+                res[0] = res[0] or tmp[0]
+                res[1] = res[1] or tmp[1]
+        # print("result is:{}".format(res))
         return res
 
     def _get_token_type(self, symbol, token):
@@ -1458,19 +1481,31 @@ class SLKProductionVocabulary(ProductionVocabulary):
         :param token: now token
         :return: [whether the token is the past set of symbol, whether the token is the before set of symbol]
         """
+        # print("get token {}:{} type ".format(token, self._label_vocabulary.get_symbol_name(token)))
+        if (symbol, token) in self._terminal_cache:
+            return self._terminal_cache[(symbol, token)]
         start_symbol = self._slk_constants.START_SYMBOL
+        if symbol < start_symbol:
+            if symbol == token:
+                return [False, True]
+            else:
+                return [True, False]
         start_entry = self._slk_constants.parse_row[symbol - start_symbol + 1]
         entry = self._slk_constants.parse_table[start_entry + token]
-        return self._get_token_type_from_entry(entry, )
+        res = self._get_token_type_from_entry(entry, token)
+        self._terminal_cache[(symbol, token)] = res
+        return res
 
     def _get_all_compact_id(self):
         start_symbol = self._slk_constants.START_SYMBOL
         end_symbol = self._slk_constants.START_ACTION
         res = dict()
         for symbol in range(start_symbol, end_symbol):
+            # print("get symbol {} with {} compact id".format(symbol, self._label_vocabulary.get_symbol_name(symbol)))
             r_list = [set(), set()]
             for i in range(1, start_symbol):
                 r = self._get_token_type(symbol, i)
+                # print("type is:{}".format(r))
                 for t, f in enumerate(r):
                     if f:
                         r_list[t].add(i)
@@ -1521,13 +1556,14 @@ class SLKProductionVocabulary(ProductionVocabulary):
             return self._non_terminal_compact_dict[token_id]
 
     def get_matched_terminal_node(self, stack):
-        candidate_set, res = self._get_matched_terminal_node(stack[-1])
+        candidate_set, res = [set(t) for t in self._get_matched_terminal_node(stack[-1])]
 
         for i in itertools.count(-2, -1):
             if stack[i] == 0:
                 break
             if self._slk_constants.is_action(stack[i]):
                 continue
+            # print("symbol:{}".format(self._label_vocabulary.get_symbol_name(stack[i])))
             set_past, set_before = self._get_matched_terminal_node(stack[i])
             res |= (set_before & candidate_set)
             candidate_set &= set_past
@@ -1588,7 +1624,6 @@ class DynamicSLKParser(object):
         self._sklconstants = skl_constants
         self._label_vocabulary = label_vocabulary
         self._slk_production_vocabulary = SLKProductionVocabulary(slk_constants=skl_constants)
-        self
 
     def _report_str(self, symbol, token):
         return "Now symbol is {} and now token is {}".format(self._label_vocabulary.get_symbol_name(symbol),
@@ -1641,7 +1676,7 @@ class DynamicSLKParser(object):
                     level += 1
                 if entry != 0:
                     index = self._sklconstants.production_row[entry]
-                    print(self._label_vocabulary.get_production_name(entry))
+                    # print(self._label_vocabulary.get_production_name(entry))
                     production_length = self._sklconstants.production_table[index] - 1
                     index += 1
                     lhs = self._sklconstants.production_table[index]
@@ -1660,7 +1695,7 @@ class DynamicSLKParser(object):
                     action.match_terminal_value(token, tokens.last_token_value())
                     token = tokens.get()
                     if token is None:
-                        print("{}:{}".format(stack[-1], self._label_vocabulary.get_symbol_name(stack[-1])))
+                        # print("{}:{}".format(stack[-1], self._label_vocabulary.get_symbol_name(stack[-1])))
                         yield self._slk_production_vocabulary.get_matched_terminal_node(stack)
                         token = tokens.get()
                         assert token is not None
@@ -1786,7 +1821,7 @@ if __name__ == '__main__':
     print([t[0] for t in clex.tokens_buffer])
     token_list = iter([t[0] for t in clex.tokens_buffer])
     for t in t_parser:
-        print([label_vocabulary.get_label_by_id(tt) for tt in t])
+        print(t)
         try:
             tt = next(token_list)
             print(tt)
@@ -1794,9 +1829,9 @@ if __name__ == '__main__':
         except StopIteration:
             break
 
-    print()
-    for t in parser.get_all_compatible_token(code):
-        print(t)
+    # print()
+    # for t in parser.get_all_compatible_token(code):
+    #     print(t)
 
     # BEGIN, END, UNK = ["<BEGIN>", "<END>", "<UNK>"]
     # from read_data.load_parsed_data import get_vocabulary_id_map_with_keyword, get_token_vocabulary
