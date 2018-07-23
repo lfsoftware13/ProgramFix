@@ -1569,6 +1569,8 @@ class SLKProductionVocabulary(ProductionVocabulary):
             candidate_set &= set_past
             if not candidate_set:
                 break
+        if self._slk_constants.END_OF_SLK_INPUT_ in candidate_set:
+            res.add(self._slk_constants.END_OF_SLK_INPUT_)
         return res
 
     def is_token(self, token_id):
@@ -1792,20 +1794,20 @@ if __name__ == '__main__':
     #  return 0;
     # }'''
 
-    # code = """
-    # int add(int a, int b)
-    # {
-    #     return a+b;
-    # }
-    # """
-
-    code = r"""
-    int main ( ) 
-    { 
-        int n , m , k , i , j ; 
-        scanf ( "%d%d%d" , & n , & m , & k ) ; 
-        printf ( "%d\n" , ( m * ( m - 1 ) / 2 )
+    code = """
+    int add(int a, int b)
+    {
+        return a+b;
+    }
     """
+
+    # code = r"""
+    # int main ( )
+    # {
+    #     int n , m , k , i , j ;
+    #     scanf ( "%d%d%d" , & n , & m , & k ) ;
+    #     printf ( "%d\n" , ( m * ( m - 1 ) / 2
+    # """
 
     label_vocabulary = C99LabelVocabulary(C99SLKConstants())
 
