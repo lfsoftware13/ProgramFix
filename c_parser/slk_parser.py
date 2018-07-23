@@ -1,4 +1,5 @@
 import abc
+import itertools
 
 import toolz
 
@@ -1436,19 +1437,43 @@ class SLKProductionVocabulary(ProductionVocabulary):
         self._non_terminal_compact_dict = self._get_all_compact_id()
         self._confilict_compact_dicct = {}
 
+    def _get_token_type_from_entry(self, entry,):
+        START_CONFLICT = self._slk_constants.START_CONFLICT
+        start_symbol = self._slk_constants.START_SYMBOL
+        res = [False, False]
+        if entry >= START_CONFLICT:
+            index = self._slk_constants.conflict_row[entry - (START_CONFLICT - 1)]
+            for t in range(1, start_symbol):
+                entry = self._slk_constants.conflict_table[index + t]
+                res = [a or b for a, b in zip(self._get_token_type_from_entry(entry), res)]
+        elif entry != 0:
+            index = self._slk_constants.production_row[entry]
+            production_length = self._slk_constants.production_table[index] - 1
+            res[int(production_length != 0)] = True
+        return res
+
+    def _get_token_type(self, symbol, token):
+        """
+        :param symbol: a non terminal symbol
+        :param token: now token
+        :return: [whether the token is the past set of symbol, whether the token is the before set of symbol]
+        """
+        start_symbol = self._slk_constants.START_SYMBOL
+        start_entry = self._slk_constants.parse_row[symbol - start_symbol + 1]
+        entry = self._slk_constants.parse_table[start_entry + token]
+        return self._get_token_type_from_entry(entry, )
+
     def _get_all_compact_id(self):
         start_symbol = self._slk_constants.START_SYMBOL
         end_symbol = self._slk_constants.START_ACTION
         res = dict()
         for symbol in range(start_symbol, end_symbol):
-            start_entry = self._slk_constants.parse_row[symbol-start_symbol+1]
-            r_list = set()
+            r_list = [set(), set()]
             for i in range(1, start_symbol):
-                r = self._slk_constants.parse_table[start_entry + i]
-                if r == 0:
-                    pass
-                else:
-                    r_list.add(i)
+                r = self._get_token_type(symbol, i)
+                for t, f in enumerate(r):
+                    if f:
+                        r_list[t].add(i)
             res[symbol] = r_list
         return res
 
@@ -1489,11 +1514,26 @@ class SLKProductionVocabulary(ProductionVocabulary):
     def EMPTY_id(self):
         return self._slk_constants.START_ACTION
 
-    def get_matched_terminal_node(self, token_id):
+    def _get_matched_terminal_node(self, token_id):
         if self._slk_constants.is_terminal(token_id) or token_id == self.EMPTY_id:
-            return [token_id]
+            return set([]), {token_id}
         elif self._slk_constants.is_non_terminal(token_id):
             return self._non_terminal_compact_dict[token_id]
+
+    def get_matched_terminal_node(self, stack):
+        candidate_set, res = self._get_matched_terminal_node(stack[-1])
+
+        for i in itertools.count(-2, -1):
+            if stack[i] == 0:
+                break
+            if self._slk_constants.is_action(stack[i]):
+                continue
+            set_past, set_before = self._get_matched_terminal_node(stack[i])
+            res |= (set_before & candidate_set)
+            candidate_set &= set_past
+            if not candidate_set:
+                break
+        return res
 
     def is_token(self, token_id):
         return 0 < token_id < self._slk_constants.START_ACTION
@@ -1548,6 +1588,7 @@ class DynamicSLKParser(object):
         self._sklconstants = skl_constants
         self._label_vocabulary = label_vocabulary
         self._slk_production_vocabulary = SLKProductionVocabulary(slk_constants=skl_constants)
+        self
 
     def _report_str(self, symbol, token):
         return "Now symbol is {} and now token is {}".format(self._label_vocabulary.get_symbol_name(symbol),
@@ -1566,7 +1607,7 @@ class DynamicSLKParser(object):
         token = tokens.get()
         if token is None:
             # print(self._label_vocabulary.get_symbol_name(start_symbol))
-            yield self._slk_production_vocabulary.get_matched_terminal_node(start_symbol)
+            yield self._slk_production_vocabulary.get_matched_terminal_node(stack)
             token = tokens.get()
             assert token is not None
         new_token = token
@@ -1600,6 +1641,7 @@ class DynamicSLKParser(object):
                     level += 1
                 if entry != 0:
                     index = self._sklconstants.production_row[entry]
+                    print(self._label_vocabulary.get_production_name(entry))
                     production_length = self._sklconstants.production_table[index] - 1
                     index += 1
                     lhs = self._sklconstants.production_table[index]
@@ -1618,7 +1660,8 @@ class DynamicSLKParser(object):
                     action.match_terminal_value(token, tokens.last_token_value())
                     token = tokens.get()
                     if token is None:
-                        yield self._slk_production_vocabulary.get_matched_terminal_node(stack[-1])
+                        print("{}:{}".format(stack[-1], self._label_vocabulary.get_symbol_name(stack[-1])))
+                        yield self._slk_production_vocabulary.get_matched_terminal_node(stack)
                         token = tokens.get()
                         assert token is not None
                     new_token = token
@@ -1718,14 +1761,12 @@ if __name__ == '__main__':
     # }
     # """
 
-    code = """
+    code = r"""
     int main ( ) 
     { 
-        long p ; 
-        long int a , b , c ; 
-        scanf ( "%ld %ld %ld" , & a , & b , & c ) ; 
-        p = ( b - a ) / ( float ) c ; 
-        if ( p > 0 && ( ( p - ( "%ld %ld %ld" ) * p ) % 
+        int n , m , k , i , j ; 
+        scanf ( "%d%d%d" , & n , & m , & k ) ; 
+        printf ( "%d\n" , ( m * ( m - 1 ) / 2 )
     """
 
     label_vocabulary = C99LabelVocabulary(C99SLKConstants())
