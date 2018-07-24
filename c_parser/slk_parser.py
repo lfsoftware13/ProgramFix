@@ -1125,6 +1125,9 @@ class CAction(Action):
         }
         self._token_value_list = []
         self._new_scope()
+        self._new_scope()
+        from common.constants import c_standard_library_defined_types
+        self._token_value_list[0]['typedef_name'] = c_standard_library_defined_types
 
     def predict(self, production_number):
         production = self._label_vocabulary.get_production(production_number)
