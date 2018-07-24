@@ -1167,6 +1167,12 @@ class CAction(Action):
 
         return False
 
+    def type_identifier_set(self):
+        res = set()
+        for scope in reversed(self._scope):
+            res |= scope["typedef_name"]
+        return res
+
     def _finish_parse(self):
         pass
 
@@ -1731,7 +1737,8 @@ class DynamicSLKPaserTokensWrapper(object):
     def __next__(self):
         t = next(self.iter_parser)
         t_type = [self.label_vocabulary.get_label_by_id(tt) for tt in t]
-        return t_type
+        type_id_set = self.action.type_identifier_set()
+        return t_type, type_id_set
 
 
 class PackedDynamicSLKParser(object):
@@ -1764,13 +1771,15 @@ class PackedDynamicSLKParser(object):
         c_action = CAction(self.slk_constants, self.label_vocabulary, tokens)
         tokens.typedef_lookup_fn = c_action.type_lookup_fn
         res = []
+        type_id_res = []
         for t in self._dynamic_parser.parse(tokens, c_action):
             res.append([self.label_vocabulary.get_label_by_id(tt) for tt in t])
+            type_id_res.append(c_action.type_identifier_set())
             try:
                 tokens.add_token(next(code))
             except StopIteration:
                 break
-        return res
+        return res, type_id_res
 
 
 if __name__ == '__main__':
@@ -1795,6 +1804,7 @@ if __name__ == '__main__':
     # }'''
 
     code = """
+    typedef int size_t;
     int add(int a, int b)
     {
         return a+b;
@@ -1822,8 +1832,9 @@ if __name__ == '__main__':
     t_parser = parser.new()
     print([t[0] for t in clex.tokens_buffer])
     token_list = iter([t[0] for t in clex.tokens_buffer])
-    for t in t_parser:
+    for t, type_id in t_parser:
         print(t)
+        print(type_id)
         try:
             tt = next(token_list)
             print(tt)
@@ -1831,9 +1842,11 @@ if __name__ == '__main__':
         except StopIteration:
             break
 
-    # print()
-    # for t in parser.get_all_compatible_token(code):
-    #     print(t)
+    print()
+    all_res = parser.get_all_compatible_token(code)
+    for t, type_id_set in zip(*all_res):
+        print(t)
+        print(type_id_set)
 
     # BEGIN, END, UNK = ["<BEGIN>", "<END>", "<UNK>"]
     # from read_data.load_parsed_data import get_vocabulary_id_map_with_keyword, get_token_vocabulary
