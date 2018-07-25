@@ -1125,6 +1125,9 @@ class CAction(Action):
         }
         self._token_value_list = []
         self._new_scope()
+        self._new_scope()
+        from common.constants import c_standard_library_defined_types
+        self._scope[0]['typedef_name'] = c_standard_library_defined_types
 
     def predict(self, production_number):
         production = self._label_vocabulary.get_production(production_number)
@@ -1803,12 +1806,8 @@ if __name__ == '__main__':
     #  return 0;
     # }'''
 
-    code = """
-    typedef int size_t;
-    int add(int a, int b)
-    {
-        return a+b;
-    }
+    code = r"""
+    int somme ( int i ) { if ( i != 0 ) { return 0 ; } else if ( i == 1 ) { return 1 ; } else { return ( somme ( i - 1 ) + i ) ; } } int main ( ) { int i , S , S , S , n ; scanf ( "%d" , & n ) ; i = 1 ; S = 0 ; do { ss = somme ( i ) ; i ++ ; S = S + S ; } while ( S > n ) ; printf ( "%d\n" , i ) ; return 0 ; }
     """
 
     # code = r"""

@@ -4,10 +4,11 @@ import torch
 
 from c_parser.slk_parser import PackedDynamicSLKParser
 from common.constants import pre_defined_c_tokens, pre_defined_c_tokens_map, pre_defined_c_label, \
-    pre_defined_c_library_tokens, CACHE_DATA_PATH
+    pre_defined_c_library_tokens, CACHE_DATA_PATH, c_standard_library_defined_identifier, \
+    c_standard_library_defined_types
 from common.logger import info
 from common.pycparser_util import transform_LexToken_list, transform_LexToken, tokenize_by_clex_fn
-from common.util import create_token_mask_by_token_set, disk_cache, generate_mask
+from common.util import create_token_mask_by_token_set, disk_cache, generate_mask, OrderedList
 from read_data.load_data_vocabulary import create_common_error_vocabulary
 
 
@@ -17,10 +18,11 @@ class TransformVocabularyAndSLK(object):
         self.vocab = vocab
         self.string_vocabulary_set = create_string_vocabulary_set(vocab, tokenize_fn)
         self.constant_vocabulary_set = create_constant_vocabulary_set(vocab, tokenize_fn)
-        self.id_vocabulary_set = create_id_vocabulary_set(vocab, tokenize_fn)
+        self.id_vocabulary_set = create_identifier_vocabulary_set(vocab, tokenize_fn)
         self.end_label_vocabulary_set = create_end_label_vocabulary_set(vocab, tokenize_fn)
         self.keyword_vocabulary_dict = create_keyword_vocabulary_dict(vocab)
-        self.pre_defined_c_library_set = create_pre_defined_c_library_vocabulary_set(vocab)
+        self.pre_defined_c_identifier_library_set = create_pre_defined_c_library_identifier_vocabulary_set(vocab)
+        self.pre_defined_c_typeid_library_set = create_pre_defined_c_library_typeid_vocabulary_set(vocab)
 
         self.id_to_token_dict = create_ids_to_token_dict(vocab, tokenize_fn)
 
@@ -54,14 +56,18 @@ class TransformVocabularyAndSLK(object):
         constant_set = total_set & self.constant_vocabulary_set
         return id_set, string_set, constant_set
 
-    def convert_slk_type_to_token_set(self, slk_type, id_set, string_set, constant_set):
+    def convert_slk_type_to_token_set(self, slk_type, id_set, string_set, constant_set, typeid_set):
         # total_id_set = {self.vocab.word_to_id(self.vocab.unk)}
         total_id_set = set()
         if 'END_OF_SLK_INPUT' in slk_type:
             total_id_set |= self.end_label_vocabulary_set
-        if 'ID' in slk_type or 'TYPEID' in slk_type:
-            total_id_set |= id_set
-            total_id_set |= self.pre_defined_c_library_set
+        if 'ID' in slk_type:
+            tmp_id_set = id_set - typeid_set - self.pre_defined_c_typeid_library_set
+            total_id_set |= tmp_id_set
+            total_id_set |= self.pre_defined_c_identifier_library_set
+        if 'TYPEID' in slk_type:
+            total_id_set |= typeid_set
+            total_id_set |= self.pre_defined_c_typeid_library_set
         if 'STRING_LITERAL' in slk_type:
             total_id_set |= string_set
         if 'CONSTANT' in slk_type:
@@ -77,14 +83,17 @@ class TransformVocabularyAndSLK(object):
             # total_id_set = id_set | self.pre_defined_c_library_set | string_set | constant_set | keyword_set
             # print('token set mask is empty')
             # info('token set mask is empty')
-        return list(sorted(list(total_id_set)))
+        return OrderedList(total_id_set)
 
     def get_slk_result(self, tokens):
         slk_res = []
         try:
-            slk_res = self.parser.get_all_compatible_token(tokens)
+            slk_res, typeid_res = self.parser.get_all_compatible_token(tokens)
+            typeid_set = [{self.vocab.word_to_id(x) for x in
+                           filter(lambda x: x in self.vocab.word_to_id_dict.keys(), typeids)} for typeids in typeid_res]
         except Exception as e:
-            slk_res = [[] for i in range(len(tokens)+1)]
+            # slk_res = [[] for i in range(len(tokens)+1)]
+            # typeid_res = [[] for i in range(len(tokens)+1)]
             # print(e)
             info(str(e))
             tokens_str = ' '.join([tok.value for tok in tokens])
@@ -93,8 +102,8 @@ class TransformVocabularyAndSLK(object):
             info([tok.type for tok in tokens])
             # print(tokens_str)
             # print([tok.type for tok in tokens])
-            raise Exception('slk error')
-        return slk_res
+            raise Exception('slk error: '+ str(e))
+        return slk_res, typeid_set
 
     def create_token_mask(self, s):
         if len(s) == 0:
@@ -117,12 +126,14 @@ class TransformVocabularyAndSLK(object):
         # codes_list = self.parse_ids_to_code(token_ids_list)
         # tokens_list = self.create_tokens_list(codes_list)
         slk_result_list = [self.get_slk_result(tokens) for tokens in tokens_list]
-        token_id_set = [
-            [self.convert_slk_type_to_token_set(res, id_set, string_set, constant_set) for res in slk_result]
+        token_true_id_res = [
+            [self.convert_slk_type_to_token_set(res, id_set, string_set, constant_set, typeid_set=typeid_set) for res, typeid_set in zip(*slk_result)]
             for slk_result, id_set, string_set, constant_set in
             zip(slk_result_list, id_set_list, string_set_list, constant_set_list)]
 
-        return token_id_set
+        # token_true_id_list = [[sorted(one_ids) for one_ids in token_ids] for token_ids in token_true_id_set]
+
+        return token_true_id_res
 
     def create_new_slk_iterator(self):
         return self.parser.new()
@@ -133,10 +144,13 @@ class TransformVocabularyAndSLK(object):
 
         if token_id is not None:
             token = copy.copy(self.id_to_token_dict[token_id])
+            # print(token)
             t_parser.add_token(token)
-        slk_result = next(t_parser)
+        slk_result, typeid_res = next(t_parser)
+        typeid_set = {self.vocab.word_to_id(x) for x in
+                      filter(lambda x: x in self.vocab.word_to_id_dict.keys(), typeid_res)}
         # print(slk_result)
-        token_id_list = self.convert_slk_type_to_token_set(slk_result, *previous_id_set_list)
+        token_id_list = self.convert_slk_type_to_token_set(slk_result, *previous_id_set_list, typeid_set=typeid_set)
         return token_id_list
 
 
@@ -155,9 +169,9 @@ def create_constant_vocabulary_set(vocab, tokenize_fn):
     return token_set
 
 
-@disk_cache(basename='create_id_vocabulary_set', directory=CACHE_DATA_PATH)
-def create_id_vocabulary_set(vocab, tokenize_fn):
-    constant_label = ['ID', 'TYPEID']
+@disk_cache(basename='create_identifier_vocabulary_set', directory=CACHE_DATA_PATH)
+def create_identifier_vocabulary_set(vocab, tokenize_fn):
+    constant_label = ['ID']
     token_set = create_special_type_vocabulary_mask(vocab, tokenize_fn, constant_label)
     return token_set
 
@@ -178,10 +192,19 @@ def create_keyword_vocabulary_dict(vocab):
     return keyword_dict
 
 
-@disk_cache(basename='create_pre_defined_c_library_vocabulary_set', directory=CACHE_DATA_PATH)
-def create_pre_defined_c_library_vocabulary_set(vocab):
+@disk_cache(basename='create_pre_defined_c_library_identifier_vocabulary_set', directory=CACHE_DATA_PATH)
+def create_pre_defined_c_library_identifier_vocabulary_set(vocab):
     library_set = set()
-    for word in pre_defined_c_library_tokens:
+    for word in c_standard_library_defined_identifier:
+        if word in vocab.word_to_id_dict.keys():
+            library_set |= {vocab.word_to_id(word)}
+    return library_set
+
+
+@disk_cache(basename='create_pre_defined_c_library_typeid_vocabulary_set', directory=CACHE_DATA_PATH)
+def create_pre_defined_c_library_typeid_vocabulary_set(vocab):
+    library_set = set()
+    for word in c_standard_library_defined_types:
         if word in vocab.word_to_id_dict.keys():
             library_set |= {vocab.word_to_id(word)}
     return library_set
@@ -247,7 +270,7 @@ if __name__ == '__main__':
 
     id_to_token_dict = create_ids_to_token_dict(vocabulary, tokenize_fn)
     u_id = vocabulary.word_to_id(end_tokens[0])
-    word = vocabulary.id_to_word(30600)
+    word = vocabulary.id_to_word(29947)
     print('end_id: {}'.format(u_id))
     # print('u id : {}, u token: {}'.format(u_id, id_to_token_dict[u_id]))
 

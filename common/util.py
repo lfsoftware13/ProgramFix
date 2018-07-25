@@ -1031,7 +1031,17 @@ class CustomerDataSet(Dataset):
         return len(self._samples)
 
 
+class OrderedList(list):
+    def __init__(self, s: set):
+        super(OrderedList, self).__init__(sorted(s))
+        self.stored_set = s
+
+    def __contains__(self, item):
+        return item in self.stored_set
+
+
 if __name__ == '__main__':
-    mask = generate_mask([], 4)
-    a = [m for m in mask]
-    print(a)
+    o = OrderedList({3, 1, 2})
+    print(2 in o)
+    print(4 in o)
+    print(o)
