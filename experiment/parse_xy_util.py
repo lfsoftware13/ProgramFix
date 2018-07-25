@@ -269,6 +269,49 @@ def parse_error_tokens_and_action_map(df, data_type, keyword_vocab, sort_fn=None
     return df['error_code_word_id'], df['ac_code_word_id'], df['token_map'], df['error_mask'], df['is_copy'], df['pointer_map'], df['distance']
 
 
+def parse_error_tokens_and_action_map_encoder_copy(df, data_type, keyword_vocab, sort_fn=None, tokenize_fn=None,
+                                                   inner_begin_id=-1, inner_end_id=-1):
+    df['res'] = ''
+    df['ac_code_obj'] = df['ac_code'].map(tokenize_fn)
+    df = df[df['ac_code_obj'].map(lambda x: x is not None)].copy()
+    df['ac_code_obj'] = df['ac_code_obj'].map(list)
+    print('after tokenize: ', len(df.index))
+
+    df = df.apply(create_error_list, axis=1, raw=True, sort_fn=sort_fn)
+    df = df[df['res'].map(lambda x: x is not None)].copy()
+    print('after create error: ', len(df.index))
+
+    df = df.apply(create_token_id_input, axis=1, raw=True, keyword_voc=keyword_vocab)
+    df = df[df['res'].map(lambda x: x is not None)].copy()
+    print('after create token id: ', len(df.index))
+
+    df['ac_code_word'] = df['ac_code_obj'].map(create_name_list_by_LexToken)
+    transform_word_to_id_fn = lambda name_list: keyword_vocab.parse_text([name_list], False)[0]
+    df['ac_code_word_id'] = df['ac_code_word'].map(transform_word_to_id_fn)
+
+    get_first_fn = lambda x: x[0]
+    df['error_code_word_id'] = df['token_id_list'].map(get_first_fn)
+
+    create_token_map_by_action_fn = lambda one: create_token_map_by_action(one['error_code_word_id'], one['action_list'])
+    df['token_map'] = df.apply(create_token_map_by_action_fn, raw=True, axis=1)
+
+    create_tokens_error_mask_fn = lambda one: create_tokens_error_mask(one['error_code_word_id'], one['action_list'])
+    df['error_mask'] = df.apply(create_tokens_error_mask_fn, raw=True, axis=1)
+    df = df[df['error_mask'].map(lambda x: x is not None)].copy()
+    print('after error_mask id: ', len(df.index))
+
+    df['is_copy'] = df.apply(create_is_copy_for_ac_tokens_encoder_copy, raw=True, axis=1)
+
+    df['distance'] = df['action_list'].map(len)
+    df['ac_code_target_id'] = df.apply(create_encoder_copy_ac_code_target_fn(inner_begin_id, inner_end_id), raw=True,
+                                       axis=1)
+    df['ac_code_target'] = df['ac_code_target_id'].map(create_encode_copy_model_target_fn(inner_begin_id, inner_end_id))
+
+    return df['error_code_word_id'], df['ac_code_word_id'], df['token_map'], df['error_mask'], df['is_copy'],\
+           df['distance'], df['ac_code_target_id'], df['ac_code_target']
+
+
+
 def parse_output_and_position_map(error_ids, ac_ids, original_distance):
     dis, action_list = generate_actions_from_ac_to_error_by_code(error_ids, ac_ids, max_distance=10)
     if dis >= original_distance or dis <= 0 or dis >= 10:
@@ -463,6 +506,117 @@ def create_copy_for_ac_tokens(ac_code_obj, action_token_list):
     return is_copy_label
 
 
+def create_sample_target_for_encoder_copy_model(ac_code_obj, action_token_list, inner_begin_id, inner_end_id):
+    ac_code_length = len(ac_code_obj) + 1
+    source_count = [1] * ac_code_length
+    source_change = [False] * ac_code_length
+    for cur_action in action_token_list:
+        cur_token_pos = cur_action['token_pos']
+        cur_type = cur_action['act_type']
+
+        if cur_type == DELETE:
+            source_count[cur_token_pos] -= 1
+            source_count[cur_token_pos] = max(source_count[cur_token_pos], 0)
+        elif cur_type == CHANGE:
+            pass
+        elif cur_type == INSERT:
+            source_count[cur_token_pos] += 1
+        source_change[cur_token_pos] = True
+    res = []
+    in_sample = False
+    delete_before = False
+    for word_id, count, change in zip(ac_code_obj, source_count, source_change):
+        if in_sample:
+            if change:
+                res.append(word_id)
+            else:
+                in_sample = False
+                if delete_before:
+                    res.append(word_id)
+                    res.append(inner_end_id)
+                else:
+                    res.append(inner_end_id)
+                    res.append(word_id)
+        else:
+            if change:
+                in_sample = True
+                res.append(inner_begin_id)
+            res.append(word_id)
+        if count == 0:
+            delete_before = True
+        else:
+            delete_before = False
+    if in_sample:
+        res.append(inner_end_id)
+    return res
+
+
+def create_encoder_copy_ac_code_target_fn(inner_begin_id, inner_end_id):
+    def f(one):
+        ac_code_obj = one['ac_code_word_id']
+        action_token_list = json.loads(one['action_character_list'])
+        return create_sample_target_for_encoder_copy_model(ac_code_obj, action_token_list, inner_begin_id, inner_end_id)
+
+    return f
+
+
+def create_encode_copy_model_target_fn(inner_begin_id, inner_end_id):
+    def f(x):
+        in_sample = False
+        res = []
+        for t in x:
+            if in_sample:
+                res.append(t)
+                if t == inner_end_id:
+                    in_sample = False
+            else:
+                if t == inner_begin_id:
+                    in_sample = True
+                    res.append(t)
+                else:
+                    res.append(-1)
+        return res
+    return f
+
+
+def create_is_copy_for_ac_tokens_encoder_copy(one):
+    ac_code_obj = one['ac_code_obj']
+    action_token_list = json.loads(one['action_character_list'])
+
+    is_copy_label = create_copy_for_encoder(len(one['error_code_word_id'])+1,
+                                            len(ac_code_obj)+1, action_token_list)
+    return is_copy_label
+
+
+def create_copy_for_encoder(error_code_length, ac_code_length, action_token_list):
+    is_copy_label = [1] * error_code_length
+    source_count = [1] * ac_code_length
+    source_change = [False] * ac_code_length
+    for cur_action in action_token_list:
+        cur_token_pos = cur_action['token_pos']
+        cur_type = cur_action['act_type']
+
+        if cur_type == DELETE:
+            source_count[cur_token_pos] -= 1
+            source_count[cur_token_pos] = max(source_count[cur_token_pos], 0)
+        elif cur_type == CHANGE:
+            pass
+        elif cur_type == INSERT:
+            source_count[cur_token_pos] += 1
+        source_change[cur_token_pos] = True
+
+    c = 0
+    for ac_count, ac_change in zip(source_count, source_change):
+        if ac_change:
+            if ac_count == 0:
+                is_copy_label[c] = 0
+            else:
+                for t in range(c, c+ac_count):
+                    is_copy_label[t] = 0
+        c += ac_count
+    return is_copy_label
+
+
 def create_one_pointer_map_for_ac_tokens(one):
     ac_code_obj = one['ac_code_obj']
     action_token_list = json.loads(one['action_character_list'])
@@ -532,18 +686,21 @@ def calculate_action_bias_from_iterative_to_static(action_list):
 if __name__ == '__main__':
     choosed_list = choose_token_random_batch([100, 20], [[True if i % 10 == 0 else False for i in range(100)], [True if i % 5 == 0 else False for i in range(20)]])
     print(choosed_list)
-    # actions = [
-    #     # {'type':CHANGE, 'pos': 5},
-    #     # {'type':CHANGE, 'pos': 5},
-    #     # {'type':INSERT, 'pos': 5},
-    #     # {'type':INSERT, 'pos': 5},
-    #     {'type':DELETE, 'pos': 4},
-    #     {'type':DELETE, 'pos': 4},
-    #     # {'type':CHANGE, 'pos': 5},
-    # ]
+    actions = [
+        {'act_type':CHANGE, 'token_pos': 5},
+        {'act_type':INSERT, 'token_pos': 4},
+        {'act_type':DELETE, 'token_pos': 3},
+        {'act_type':DELETE, 'token_pos': 7},
+        {'act_type':DELETE, 'token_pos': 9},
+    ]
     #
     # token_map = create_token_map_by_action([1 for i in range(10)], actions)
     # print(token_map)
     #
     # error_mask = create_tokens_error_mask([1 for i in range(10)], actions)
     # print(error_mask)
+
+    print(create_copy_for_encoder(10, 10, actions))
+    target_id = create_sample_target_for_encoder_copy_model(list(range(10)), actions, -2, -3)
+    print(target_id)
+    print(create_encode_copy_model_target_fn(-2, -3)(target_id))

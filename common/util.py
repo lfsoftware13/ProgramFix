@@ -418,7 +418,11 @@ def generate_mask(mask_index, size):
     return res
 
 
-def data_loader(dataset, batch_size, is_shuffle=True, drop_last=False, epoch_ratio=1.0):
+def _get_dataset_item(x):
+    return x[0][x[1]]
+
+
+def data_loader(dataset, batch_size, is_shuffle=True, drop_last=False, epoch_ratio=1.0, multi_process=False):
     idxs = list(range(len(dataset)))
     if is_shuffle:
         idxs = shuffle(idxs)
@@ -1038,6 +1042,13 @@ class OrderedList(list):
 
     def __contains__(self, item):
         return item in self.stored_set
+
+
+def get_position(l, t):
+    for i, m in enumerate(l):
+        if m == t:
+            return i
+    return -1
 
 
 if __name__ == '__main__':

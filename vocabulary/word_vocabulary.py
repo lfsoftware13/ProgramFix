@@ -25,6 +25,10 @@ class Vocabulary(object):
         self.word_to_id_dict = word_to_id_dict
         self.id_to_word_dict = util.reverse_dict(self.word_to_id_dict)
 
+    def add_token(self, token: str):
+        self.word_to_id_dict[token] = len(self.word_to_id_dict)
+        self.id_to_word_dict[len(self.id_to_word_dict)] = token
+
     def word_to_id(self, word):
         if word in self.word_to_id_dict.keys():
             return self.word_to_id_dict[word]

@@ -1,6 +1,6 @@
 from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens, SLK_SAMPLE_DBPATH, \
     SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME
-from common.evaluate_util import SLKOutputAccuracyAndCorrect
+from common.evaluate_util import SLKOutputAccuracyAndCorrect, EncoderCopyAccuracyAndCorrect
 from common.opt import OpenAIAdam
 from common.pycparser_util import tokenize_by_clex_fn
 from model.one_pointer_copy_self_attention_seq2seq_model_gammar_mask_refactor import load_sample_save_dataset, \
@@ -87,4 +87,91 @@ def test_config1(is_debug):
     }
 
 
+def encoder_copy_config1(is_debug):
+    import pandas as pd
+    vocabulary = load_vocabulary()
+    vocabulary.add_token("<inner_begin>")
+    vocabulary.add_token("<inner_end>")
+    vocabulary.add_token("<PAD>")
+    inner_begin_id = vocabulary.word_to_id("<inner_begin>")
+    inner_end_id = vocabulary.word_to_id("<inner_end>")
+    pad_id = vocabulary.word_to_id("<PAD>")
+    begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+    end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+    tokenize_fn = tokenize_by_clex_fn()
+    transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
+
+    batch_size = 8
+    epoches = 40
+    ignore_id = -1
+    max_length = 500
+
+    if is_debug:
+        from experiment.experiment_util import load_common_error_data_sample_with_encoder_copy_100
+        from model.seq_to_seq_model_with_encoder_is_copy import CCodeDataset
+        datasets = []
+        for t in load_common_error_data_sample_with_encoder_copy_100(inner_begin_id, inner_end_id):
+            t = pd.DataFrame(t)
+            datasets.append(CCodeDataset(t, vocabulary, 'train', transformer,
+                                         inner_begin_id, inner_end_id, begin_id, end_id, ignore_id=ignore_id,
+                                         MAX_LENGTH=max_length))
+        datasets.append(None)
+    else:
+        from experiment.experiment_util import load_common_error_data_with_encoder_copy
+        from model.seq_to_seq_model_with_encoder_is_copy import CCodeDataset
+        datasets = []
+        for t in load_common_error_data_with_encoder_copy(inner_begin_id, inner_end_id):
+            t = pd.DataFrame(t)
+            datasets.append(CCodeDataset(t, vocabulary, 'train', transformer,
+                                         inner_begin_id, inner_end_id, begin_id, end_id, ignore_id=ignore_id,
+                                         MAX_LENGTH=max_length))
+        datasets.append(None)
+
+    train_len = len(datasets[0])
+
+    from model.seq_to_seq_model_with_encoder_is_copy import Seq2SeqEncoderCopyModel
+    from model.seq_to_seq_model_with_encoder_is_copy import create_parse_target_batch_data
+    from model.seq_to_seq_model_with_encoder_is_copy import create_loss_fn
+    from model.seq_to_seq_model_with_encoder_is_copy import create_output_ids_fn
+    return {
+        'name': 'encoder_copy',
+        'save_name': 'encoder_copy.pkl',
+        'load_model_name': 'encoder_copy.pkl',
+        'logger_file_path': 'encoder_copy.log',
+
+        'model_fn': Seq2SeqEncoderCopyModel,
+        'model_dict': {"vocabulary_size": vocabulary.vocabulary_size,
+                       "embedding_size": 400,
+                       "hidden_state_size": 400,
+                       "start_label": begin_id,
+                       "end_label": end_id,
+                       "pad_label": pad_id,
+                       "slk_parser": transformer,
+                       "MAX_LENGTH": max_length,
+                       "n_layer": 3},
+
+        'do_sample_evaluate': False,
+
+        'vocabulary': vocabulary,
+        'parse_input_batch_data_fn': lambda x, do_sample=False: [x],
+        'parse_target_batch_data_fn': create_parse_target_batch_data(ignore_id),
+        'expand_output_and_target_fn': None,
+        'create_output_ids_fn': create_output_ids_fn,
+        'train_loss': create_loss_fn(ignore_id),
+        'evaluate_object_list': [EncoderCopyAccuracyAndCorrect(ignore_token=ignore_id)],
+
+        'ac_copy_train': False,
+        'ac_copy_radio': 0.2,
+
+        'epcohes': epoches,
+        'start_epoch': 0,
+        'epoch_ratio': 0.25,
+        'learning_rate': 6.25e-5,
+        'batch_size': batch_size,
+        'clip_norm': 1,
+        'optimizer': OpenAIAdam,
+        'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
+                           't_total': epoches * train_len//batch_size, 'max_grad_norm': 10},
+        'data': datasets
+    }
 

@@ -57,7 +57,7 @@ def train(model, dataset, batch_size, loss_function, optimizer, clip_norm, epoch
             loss.backward()
             optimizer.step()
 
-            output_ids = create_output_ids_fn(model_output, model_input)
+            output_ids = create_output_ids_fn(model_output, model_input, False)
             for evaluator in evaluate_obj_list:
                 evaluator.add_result(output_ids, model_output, model_target, model_input, batch_data=batch_data)
 
@@ -103,7 +103,7 @@ def evaluate(model, dataset, batch_size, loss_function, parse_input_batch_data_f
 
                 loss = loss_function(*model_output, *model_target)
 
-                output_ids = create_output_ids_fn(model_output, model_input)
+                output_ids = create_output_ids_fn(model_output, model_input, do_sample)
                 total_loss += loss
                 total_batch += batch_size
 

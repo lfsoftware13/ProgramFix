@@ -536,3 +536,64 @@ class SLKOutputAccuracyAndCorrect(Evaluator):
     def __repr__(self):
         return self.__str__()
 
+
+class EncoderCopyAccuracyAndCorrect(Evaluator):
+    def __init__(self, ignore_token=None):
+        self.is_copy_evaluator = SLKOutputAccuracyAndCorrect(ignore_token)
+        self.sample_evaluator = SLKOutputAccuracyAndCorrect(ignore_token)
+        self.all_evaluator = SLKOutputAccuracyAndCorrect(ignore_token)
+        self.ignore_token = ignore_token
+
+    def clear_result(self):
+        self.is_copy_evaluator.clear_result()
+        self.sample_evaluator.clear_result()
+        self.all_evaluator.clear_result()
+
+    def get_result(self):
+        return self.is_copy_evaluator.get_result(), self.sample_evaluator.get_result(), self.all_evaluator.get_result()
+
+    def __str__(self):
+        is_copy, sample, all_res = self.get_result()
+        return "EncoderCopy is_copy evaluate:{}, sample evaluate:{}, all evaluate:{}".format(is_copy, sample, all_res)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def add_result(self, output, model_output, model_target, model_input, ignore_token=None, batch_data=None):
+        if ignore_token is None:
+            ignore_token = self.ignore_token
+
+        target_length = batch_data['target_length']
+        is_copy, sample_output = output
+        is_copy_target, sample_target = model_target
+        is_copy_res = self.is_copy_evaluator.add_result(is_copy, None,
+                                          [None, None, None, is_copy_target], None,
+                                          ignore_token=ignore_token, batch_data=batch_data)
+
+        def parse_sample(sample, sample_length):
+            begin = 0
+            max_length = max(sample_length)
+            res = []
+            for l in sample_length:
+                now_fragment = sample[begin:begin+l]
+                begin += l
+                res.append(
+                    torch.cat(
+                        (now_fragment,
+                         torch.ones(max_length-now_fragment.shape[0]).long().to(sample.device)*ignore_token
+                         )
+                    ).view(1, -1)
+                )
+            return torch.cat(res, dim=0)
+        sample_output = parse_sample(sample_output, target_length)
+        sample_target = parse_sample(sample_target, target_length)
+        sample_res = self.sample_evaluator.add_result(sample_output, None,
+                                         [None, None, None, sample_target], None,
+                                         ignore_token=ignore_token, batch_data=batch_data)
+        all_res = self.all_evaluator.add_result(torch.cat((is_copy, sample_output.float()), dim=-1), None,
+                                         [None, None, None, torch.cat((is_copy_target, sample_target.float()), dim=-1)],
+                                         None,
+                                         ignore_token=ignore_token, batch_data=batch_data)
+        return "is_copy evaluate:{}, sample evaluate:{}, all evaluate:{}".format(is_copy_res,
+                                                                                 sample_res,
+                                                                                 all_res)
