@@ -84,9 +84,14 @@ def ensure_file_path(file_path):
 
 
 if __name__ == '__main__':
-    tokenize_fn = tokenize_by_clex_fn()
-    code = r'''int main ( int argc , char * * argv ) { int input [ 101 ] ; int tmp ; int n ; int i ; input [ 0 ] = 0 ; scanf ( "%d" , & n ) ; for ( i = 1 ; i <= n ; ++ i ) { scanf ( "%d" , & tmp ) ; input [ i ] = tmp + input [ i - 1 ] ; } if ( input [ n ] != 0 ) { printf ( "YES\n" ) ; printf ( "1\n1 %d\n" , n ) ; return 0 ; } for ( i = n - 1 ; i > 0 ; i -- ) { if ( input [ i + 1 ] == 0 && input [ i ] != 0 ) { printf ( "YES\n" ) ; printf ( "2\n1 %d\n%d %d\n" , i , i + 1 , n ) ; return 0 ; } } printf ( "NO\n" ) ; return 0 ; }'''
-    print('start')
-    for i in range(10):
-        res = tokenize_fn(code)
-    print(transform_LexToken_list(res))
+    # tokenize_fn = tokenize_by_clex_fn()
+    # code = r'''int main ( int argc , char * * argv ) { int input [ 101 ] ; int tmp ; int n ; int i ; input [ 0 ] = 0 ; scanf ( "%d" , & n ) ; for ( i = 1 ; i <= n ; ++ i ) { scanf ( "%d" , & tmp ) ; input [ i ] = tmp + input [ i - 1 ] ; } if ( input [ n ] != 0 ) { printf ( "YES\n" ) ; printf ( "1\n1 %d\n" , n ) ; return 0 ; } for ( i = n - 1 ; i > 0 ; i -- ) { if ( input [ i + 1 ] == 0 && input [ i ] != 0 ) { printf ( "YES\n" ) ; printf ( "2\n1 %d\n%d %d\n" , i , i + 1 , n ) ; return 0 ; } } printf ( "NO\n" ) ; return 0 ; }'''
+    # print('start')
+    # for i in range(10):
+    #     res = tokenize_fn(code)
+    # print(transform_LexToken_list(res))
+    with open(r'.\c_parser\fake_c_header\stdio.h') as f:
+        test = f.read()
+    c_parser = init_pycparser(lexer=BufferedCLex)
+    res = c_parser.parse(test)
+    print(c_parser._scope_stack)

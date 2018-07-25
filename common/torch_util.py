@@ -8,7 +8,7 @@ import typing
 from torch.nn.modules.rnn import RNNCellBase
 from torch.nn.utils.rnn import PackedSequence
 
-from common.args_util import to_cuda
+from common.problem_util import to_cuda
 from common.util import transform_id_to_token
 
 
@@ -337,18 +337,32 @@ class DynamicDecoder(object):
                                                               encoder_output=encoder_output,
                                                               encoder_mask=encoder_mask,
                                                               **kwargs)
-            if len(error_ids) is not None:
+            if (error_ids is not None) and len(error_ids) != 0:
+                error_ids_list = [0 for i in range(batch_size)]
                 for err in error_ids:
+                    # print('error index: {}'.format(err))
                     error_list[err] = 1
+                    error_ids_list[err] = 1
+                error_ids_tensor = to_cuda(torch.ByteTensor(error_ids_list))
+                continue_mask = continue_mask & ~error_ids_tensor
+                    # continue_mask[err] = 0
             decoder_output_list += [one_step_decoder_output]
 
             outputs = self.create_next_output_fn(one_step_decoder_output, **kwargs)
             outputs_list += [outputs]
-            step_continue = torch.ne(outputs, self.end_label).view(outputs.shape[0])
+            step_continue = torch.ne(outputs, self.end_label).view(batch_size)
             continue_mask = continue_mask & step_continue
 
-            if torch.sum(continue_mask&~to_cuda(torch.ByteTensor(error_list))) == 0:
+            # try:
+            if torch.sum(continue_mask) == 0:
                 break
+            # except Exception as e:
+            #     print(e)
+            #     print(error_list)
+            #     print(outputs)
+            #     print(step_continue)
+            #     print(continue_mask)
+            #     raise Exception(e)
         return decoder_output_list, outputs_list, error_list
 
 

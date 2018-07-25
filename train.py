@@ -24,11 +24,15 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
         m = nn.DataParallel(m.cuda(), device_ids=[0, 1])
     elif gpu_index is not None:
         m = nn.DataParallel(m.cuda(), device_ids=[gpu_index])
+    else:
+        m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
         torch_util.load_model(m, path)
         print("load previous model")
     else:
         print("create new model")
+    if gpu_index is None:
+        m = m.module.cpu()
     return m
 
 

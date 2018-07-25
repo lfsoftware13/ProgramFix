@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from common.args_util import to_cuda
 from common.logger import info
 
 
