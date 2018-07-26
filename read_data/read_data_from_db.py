@@ -3,9 +3,10 @@ import pandas as pd
 
 from common.constants import verdict, langdict, scrapyOJ_DB_PATH, CACHE_DATA_PATH, TRAIN_DATA_DBPATH, \
     ACTUAL_C_ERROR_RECORDS, COMPILE_SUCCESS_DATA_DBPATH, C_COMPILE_SUCCESS_RECORDS, FAKE_C_COMPILE_ERROR_DATA_DBPATH, \
-    COMMON_C_ERROR_RECORDS, RANDOM_C_ERROR_RECORDS
+    COMMON_C_ERROR_RECORDS, RANDOM_C_ERROR_RECORDS, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN, \
+    SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID
 from common.util import disk_cache
-from config import DEEPFIX_DB
+from config import DEEPFIX_DB, SLK_SAMPLE_DBPATH
 
 
 def merge_and_deal_submit_table(problems_df, submit_df):
@@ -127,6 +128,27 @@ def read_fake_random_c_error_records():
 def read_deepfix_records():
     con = sqlite3.connect("file:{}?mode=ro".format(DEEPFIX_DB), uri=True)
     test_df = pd.read_sql('select * from {}'.format('Code'), con)
+    return test_df
+
+
+@disk_cache(basename='read_slk_grammar_sample_train_records', directory=CACHE_DATA_PATH)
+def read_slk_grammar_sample_train_records():
+    con = sqlite3.connect("file:{}?mode=ro".format(SLK_SAMPLE_DBPATH), uri=True)
+    train_df = pd.read_sql('select * from {}'.format(SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN), con)
+    return train_df
+
+
+@disk_cache(basename='read_slk_grammar_sample_valid_records', directory=CACHE_DATA_PATH)
+def read_slk_grammar_sample_valid_records():
+    con = sqlite3.connect("file:{}?mode=ro".format(SLK_SAMPLE_DBPATH), uri=True)
+    valid_df = pd.read_sql('select * from {}'.format(SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID), con)
+    return valid_df
+
+
+@disk_cache(basename='read_slk_grammar_sample_test_records', directory=CACHE_DATA_PATH)
+def read_slk_grammar_sample_test_records():
+    con = sqlite3.connect("file:{}?mode=ro".format(SLK_SAMPLE_DBPATH), uri=True)
+    test_df = pd.read_sql('select * from {}'.format(SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST), con)
     return test_df
 
 

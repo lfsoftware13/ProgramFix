@@ -1,5 +1,6 @@
-from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens, SLK_SAMPLE_DBPATH, \
+from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens, \
     SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME
+from config import SLK_SAMPLE_DBPATH
 from common.evaluate_util import SLKOutputAccuracyAndCorrect, EncoderCopyAccuracyAndCorrect
 from common.opt import OpenAIAdam
 from common.pycparser_util import tokenize_by_clex_fn

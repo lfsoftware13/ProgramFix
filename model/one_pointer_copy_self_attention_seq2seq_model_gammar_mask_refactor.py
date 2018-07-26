@@ -692,7 +692,7 @@ def create_combine_loss_fn(copy_weight=1, pointer_weight=1, value_weight=1, aver
     return combine_total_loss
 
 
-def create_output_ids(model_output, model_input):
+def create_output_ids(model_output, model_input, do_sample=False):
     """
 
     :param copy_output: [batch, sequence, dim**]
@@ -743,7 +743,8 @@ def create_save_sample_data(vocab):
                 continue
             rec = [batch_data['id'][i], batch_data['user_id'][i], batch_data['problem_id'][i],
                    batch_data['problem_user_id'][i], '\n'.join(batch_data['includes'][i]), batch_data['code'][i],
-                   sample_code, batch_data['similar_code'][i]]
+                   sample_code, batch_data['similar_code'][i], batch_data['original_modify_action_list'][i],
+                   batch_data['original_distance'][i]]
             saved_list += [rec]
         return saved_list
     return add_model_data_record

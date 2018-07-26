@@ -311,6 +311,12 @@ def parse_error_tokens_and_action_map_encoder_copy(df, data_type, keyword_vocab,
            df['distance'], df['ac_code_target_id'], df['ac_code_target']
 
 
+def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_fn=None, tokenize_fn=None):
+
+    pass
+
+
+
 
 def parse_output_and_position_map(error_ids, ac_ids, original_distance):
     dis, action_list = generate_actions_from_ac_to_error_by_code(error_ids, ac_ids, max_distance=10)

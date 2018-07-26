@@ -19,8 +19,6 @@ COMPILE_TMP_PATH = temp_code_write_path
 TRAIN_DATA_DBPATH = os.path.join(DATA_PATH, 'train_data.db')
 COMPILE_SUCCESS_DATA_DBPATH = os.path.join(DATA_PATH, 'compile_success_data.db')
 FAKE_C_COMPILE_ERROR_DATA_DBPATH = os.path.join(DATA_PATH, 'fake_c_compile_error_data.db')
-SLK_SAMPLE_DBPATH = os.path.join(DATA_PATH, 'slk_sample_data.db')
-
 
 # table name
 ACTUAL_C_ERROR_RECORDS = 'actual_c_error_records'

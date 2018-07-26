@@ -81,7 +81,9 @@ CREATE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN = r'''CREATE TABLE IF NOT EXISTS 
   sample_code TEXT,
   similar_code TEXT DEFAULT '', 
   modify_action_list TEXT DEFAULT '', 
-  distance INTEGER DEFAULT -1
+  distance INTEGER DEFAULT -1, 
+  original_modify_action_list TEXT DEFAULT '', 
+  original_distance INTEGER DEFAULT -1
   )
 '''
 
@@ -95,7 +97,9 @@ CREATE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID = r'''CREATE TABLE IF NOT EXISTS 
   sample_code TEXT,
   similar_code TEXT DEFAULT '', 
   modify_action_list TEXT DEFAULT '', 
-  distance INTEGER DEFAULT -1
+  distance INTEGER DEFAULT -1, 
+  original_modify_action_list TEXT DEFAULT '', 
+  original_distance INTEGER DEFAULT -1
   )
 '''
 
@@ -109,7 +113,9 @@ CREATE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST = r'''CREATE TABLE IF NOT EXISTS s
   sample_code TEXT,
   similar_code TEXT DEFAULT '', 
   modify_action_list TEXT DEFAULT '', 
-  distance INTEGER DEFAULT -1
+  distance INTEGER DEFAULT -1, 
+  original_modify_action_list TEXT DEFAULT '', 
+  original_distance INTEGER DEFAULT -1
   )
 '''
 
@@ -124,9 +130,9 @@ INSERT_IGNORE_CPP_TESTCASE_ERROR_RECORDS = r'''INSERT OR IGNORE INTO cpp_testcas
 INSERT_IGNORE_C_COMPILE_SUCCESS_RECORDS = r'''INSERT OR IGNORE INTO c_compile_success_records (id, submit_url, problem_id, user_id, problem_user_id, language, status, error_test_id, gcc_compile_result, code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_RANDOM_C_ERROR_RECORDS = r'''INSERT OR IGNORE INTO random_c_error_records (id, submit_url, problem_id, user_id, problem_user_id, code, similar_code, modify_action_list, distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_COMMON_C_ERROR_RECORDS = r'''INSERT OR IGNORE INTO common_c_error_records (id, submit_url, problem_id, user_id, problem_user_id, code, similar_code, modify_action_list, distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'''
-INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_train (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'''
-INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_valid (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'''
-INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_test (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'''
+INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_train (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code, original_modify_action_list, original_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_valid (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code, original_modify_action_list, original_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_test (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code, original_modify_action_list, original_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 
 sql_dict = {ACTUAL_C_ERROR_RECORDS: {'create': CREATE_ACTUAL_C_ERROR_RECORDS,
                                      'insert_ignore': INSERT_IGNORE_ACTUAL_C_ERROR_RECORDS, },

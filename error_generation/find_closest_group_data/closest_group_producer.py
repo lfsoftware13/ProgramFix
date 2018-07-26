@@ -1,5 +1,6 @@
 import json
 import multiprocessing
+import sqlite3
 import sys
 import time
 
@@ -8,14 +9,19 @@ import pandas as pd
 
 from c_parser.buffered_clex import BufferedCLex
 from common.analyse_include_util import remove_include
-from read_data.read_data_from_db import read_all_c_records, read_all_cpp_records
+from config import SLK_SAMPLE_DBPATH
+from read_data.read_data_from_db import read_all_c_records, read_all_cpp_records, read_slk_grammar_sample_train_records, \
+    read_slk_grammar_sample_valid_records, read_slk_grammar_sample_test_records
 
-from common.pycparser_util import init_pycparser, tokenize_by_clex, tokenize_error_count
+from common.pycparser_util import init_pycparser, tokenize_by_clex, tokenize_error_count, tokenize_by_clex_fn
 from common.util import parallel_map, compile_cpp_code_by_gcc, \
-    group_df_to_grouped_list, chunks, compile_c_code_by_gcc, tokenize_cpp_code_by_new_tokenize
-from error_generation.find_closest_group_data.token_level_closest_text import find_closest_token_text, init_c_code, save_train_data, \
-    filter_repeat_ids
-from common.constants import verdict
+    group_df_to_grouped_list, chunks, compile_c_code_by_gcc, tokenize_cpp_code_by_new_tokenize, init_code, \
+    check_ascii_character
+from error_generation.find_closest_group_data.token_level_closest_text import find_closest_token_text, init_c_code, \
+    save_train_data, \
+    filter_repeat_ids, calculate_distance_and_action_between_two_code
+from common.constants import verdict, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID, \
+    SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST
 from common.constants import TRAIN_DATA_DBPATH, ACTUAL_C_ERROR_RECORDS, CPP_TESTCASE_ERROR_RECORDS
 from database.database_util import run_sql_select_statment
 
@@ -270,5 +276,86 @@ def parallel_and_save_group(chunk_group, chunk_count):
     return total
 
 
+def calculate_distance_between_two_code_main():
+
+    def filter_code(df):
+        df['similar_code'] = df['similar_code'].map(init_code)
+        print('data length before check ascii: {}'.format(len(df)))
+        df = df[df['similar_code'].map(check_ascii_character)]
+        print('data length after check ascii: {}'.format(len(df)))
+        df = df[df['code'].map(lambda x: x != '')]
+        df['similar_code_without_include'] = df['similar_code'].map(remove_include).map(lambda x: x.replace('\r', ''))
+        return df
+
+    def tokenize_code(df):
+        tokenize_fn = tokenize_by_clex_fn()
+        df['similar_tokenize'] = df['similar_code_without_include'].map(tokenize_fn)
+        df = df[df['similar_tokenize'].map(lambda x: x is not None)]
+        df['sample_tokenize'] = df['sample_code'].map(tokenize_fn)
+        df = df[df['sample_tokenize'].map(lambda x: x is not None)]
+        return df
+
+    def cal_distance(one, max_distance=20):
+        global count
+        count += 1
+        if count % 100 == 0:
+            print('cal distance: {}'.format(count))
+        error_tokenize = one['sample_tokenize']
+        ac_tokenize = one['similar_tokenize']
+        dis, action_list = calculate_distance_and_action_between_two_code(error_tokenize, ac_tokenize, max_distance=max_distance)
+        one['distance'] = dis
+        one['modify_action_list'] = action_list
+        return one
+
+    def save_data(df:pd.DataFrame, table_name, con:sqlite3.Connection):
+        sql = '''update <TABLE> set modify_action_list=?, distance=? where id=?'''
+        sql = sql.replace('<TABLE>', table_name)
+
+        save_list = []
+        for i, row in df.iterrows():
+            row_id = row['id']
+            dis = row['distance']
+            action_list = row['modify_action_list']
+            if dis == -1:
+                action_str = ''
+            else:
+                action_list = deal_action_type(action_list)
+                action_str = json.dumps(action_list)
+            save_list += [(action_str, dis, row_id)]
+            if len(save_list) % 1000 == 0:
+                con.executemany(sql, save_list)
+                con.commit()
+                save_list = []
+        con.executemany(sql, save_list)
+        con.commit()
+
+    db_path = SLK_SAMPLE_DBPATH
+    con = sqlite3.connect(db_path)
+
+    train_df = read_slk_grammar_sample_train_records()
+    valid_df = read_slk_grammar_sample_valid_records()
+    test_df = read_slk_grammar_sample_test_records()
+
+    # train_df = train_df.sample(100)
+    # valid_df = valid_df.sample(100)
+    # test_df = test_df.sample(100)
+
+    train_df = filter_code(train_df)
+    valid_df = filter_code(valid_df)
+    test_df = filter_code(test_df)
+
+    train_df = tokenize_code(train_df)
+    valid_df = tokenize_code(valid_df)
+    test_df = tokenize_code(test_df)
+
+    train_df = train_df.apply(cal_distance, raw=True, axis=1, max_distance=20)
+    valid_df = valid_df.apply(cal_distance, raw=True, axis=1, max_distance=20)
+    test_df = test_df.apply(cal_distance, raw=True, axis=1, max_distance=20)
+
+    save_data(train_df, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN, con)
+    save_data(valid_df, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID, con)
+    save_data(test_df, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST, con)
+
+
 if __name__ == '__main__':
-    find_cpp_testcase_error_closest_code_main()
+    calculate_distance_between_two_code_main()

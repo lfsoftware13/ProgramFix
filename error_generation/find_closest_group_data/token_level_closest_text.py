@@ -84,6 +84,18 @@ def find_closest_token_text(one, ac_df, max_distance=None):
     return one
 
 
+def calculate_distance_and_action_between_two_code(error_tokenize, ac_tokenize, max_distance=None):
+    equal_fn = generate_equal_fn(get_token_value)
+    distance, matrix = levenshtenin_distance(error_tokenize, ac_tokenize, equal_fn=equal_fn, max_distance=max_distance)
+    if distance < 0 or distance >= max_distance:
+        distance = -1
+        action_list = []
+        return distance, action_list
+    action_list = cal_action_list(matrix, error_tokenize, ac_tokenize, left_move_action, top_move_action,
+                                  left_top_move_action, equal_fn, get_token_value)
+    return distance, action_list
+
+
 def left_move_action(i, j, a_token, b_token, value_fn=lambda x: x):
     action = {'act_type': ActionType.DELETE, 'from_char': value_fn(b_token), 'to_char': '', 'token_pos': j-1}
     return action
