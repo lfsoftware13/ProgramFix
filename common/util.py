@@ -946,7 +946,7 @@ def build_code_string_from_lex_tokens(tokens):
         lexpos_pre = lexpos_temp
         lenth_v = len(str(token.value))
 
-    print(code_re)
+    # print(code_re)
     return code_re
 
 

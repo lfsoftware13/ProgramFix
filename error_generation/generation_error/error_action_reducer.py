@@ -206,12 +206,12 @@ def create_error_action_fn():
     return error_creator_list[i][1]
 
 error_creator_list = [
-    ("RANDOM", random_creator, 1),
+    # ("RANDOM", random_creator, 1),
     ("RANDOM", random_creator, 63.4),
-    # ("Undeclared_identifier", create_undeclared_identifier, 7.3),
-    # ("delete_brace", delete_brace, 7.7),
-    # ("delete_a_pair_of_braces", delete_a_pair_of_braces, 8.5),
-    # ("delete_semicolon", delete_semicolon, 7),
-    # ("delete_return_fn", delete_return_fn, 3.1),
-    # ("change_between_pointer_and_reference", change_between_pointer_and_reference, 3)
+    ("Undeclared_identifier", create_undeclared_identifier, 7.3),
+    ("delete_brace", delete_brace, 7.7),
+    ("delete_a_pair_of_braces", delete_a_pair_of_braces, 8.5),
+    ("delete_semicolon", delete_semicolon, 7),
+    ("delete_return_fn", delete_return_fn, 3.1),
+    ("change_between_pointer_and_reference", change_between_pointer_and_reference, 3)
 ]

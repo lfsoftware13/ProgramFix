@@ -1,6 +1,6 @@
 from common.constants import ACTUAL_C_ERROR_RECORDS, CPP_TESTCASE_ERROR_RECORDS, C_COMPILE_SUCCESS_RECORDS, \
     RANDOM_C_ERROR_RECORDS, COMMON_C_ERROR_RECORDS, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN, \
-    SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST
+    SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID, SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST, COMMON_DEEPFIX_ERROR_RECORDS
 
 CREATE_ACTUAL_C_ERROR_RECORDS = r'''CREATE TABLE IF NOT EXISTS actual_c_error_records (
   id TEXT PRIMARY KEY,
@@ -71,6 +71,20 @@ CREATE_COMMON_C_ERROR_RECORDS = r'''CREATE TABLE IF NOT EXISTS common_c_error_re
 '''
 
 
+CREATE_COMMON_DEEPFIX_ERROR_RECORDS = r'''CREATE TABLE IF NOT EXISTS common_deepfix_error_records (
+  id TEXT PRIMARY KEY,
+  submit_url TEXT,
+  problem_id TEXT,
+  user_id TEXT,
+  problem_user_id TEXT,
+  code TEXT,
+  similar_code TEXT DEFAULT '', 
+  modify_action_list TEXT DEFAULT '', 
+  distance INTEGER DEFAULT -1
+  )
+'''
+
+
 CREATE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN = r'''CREATE TABLE IF NOT EXISTS slk_sample_common_c_error_records_train  (
   id TEXT PRIMARY KEY,
   problem_id TEXT,
@@ -124,12 +138,14 @@ CREATE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST = r'''CREATE TABLE IF NOT EXISTS s
 FIND_CPP_TESTCASE_DISTINCT_PROBLEM_USER_ID = r'''SELECT DISTINCT problem_user_id from cpp_testcase_error_records'''
 FIND_RANDOM_C_ERROR_RECORDS_DISTINCT_PROBLEM_USER_ID = r'''SELECT DISTINCT problem_user_id from random_c_error_records'''
 FIND_COMMON_C_ERROR_RECORDS_DISTINCT_PROBLEM_USER_ID = r'''SELECT DISTINCT problem_user_id from common_c_error_records'''
+FIND_COMMON_DEEPFIX_ERROR_RECORDS_DISTINCT_PROBLEM_USER_ID = r'''SELECT DISTINCT problem_user_id from common_deepfix_error_records'''
 
 INSERT_IGNORE_ACTUAL_C_ERROR_RECORDS = r'''INSERT OR IGNORE INTO actual_c_error_records (id, submit_url, problem_id, user_id, problem_user_id, code, gcc_compile_result, pycparser_result, similar_code, modify_action_list, distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_CPP_TESTCASE_ERROR_RECORDS = r'''INSERT OR IGNORE INTO cpp_testcase_error_records (id, submit_url, problem_id, user_id, problem_user_id, code, gcc_compile_result, similar_code, modify_action_list, distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_C_COMPILE_SUCCESS_RECORDS = r'''INSERT OR IGNORE INTO c_compile_success_records (id, submit_url, problem_id, user_id, problem_user_id, language, status, error_test_id, gcc_compile_result, code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_RANDOM_C_ERROR_RECORDS = r'''INSERT OR IGNORE INTO random_c_error_records (id, submit_url, problem_id, user_id, problem_user_id, code, similar_code, modify_action_list, distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_COMMON_C_ERROR_RECORDS = r'''INSERT OR IGNORE INTO common_c_error_records (id, submit_url, problem_id, user_id, problem_user_id, code, similar_code, modify_action_list, distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+INSERT_IGNORE_COMMON_DEEPFIX_ERROR_RECORDS = r'''INSERT OR IGNORE INTO common_deepfix_error_records (id, submit_url, problem_id, user_id, problem_user_id, code, similar_code, modify_action_list, distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_train (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code, original_modify_action_list, original_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_valid (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code, original_modify_action_list, original_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_test (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code, original_modify_action_list, original_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
@@ -152,5 +168,8 @@ sql_dict = {ACTUAL_C_ERROR_RECORDS: {'create': CREATE_ACTUAL_C_ERROR_RECORDS,
             SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID: {'create': CREATE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID,
                                                         'insert_ignore': INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID},
             SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST: {'create': CREATE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST,
-                                                        'insert_ignore': INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST}
+                                                        'insert_ignore': INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST},
+            COMMON_DEEPFIX_ERROR_RECORDS: {'create': CREATE_COMMON_DEEPFIX_ERROR_RECORDS,
+                                     'insert_ignore': INSERT_IGNORE_COMMON_DEEPFIX_ERROR_RECORDS,
+                                     'find_distinct_problem_user_id': FIND_COMMON_DEEPFIX_ERROR_RECORDS_DISTINCT_PROBLEM_USER_ID},
 }

@@ -10,9 +10,13 @@ import time
 from common.token_operation_util import generate_token_action
 from common.pycparser_util import tokenize_by_clex_fn
 from error_generation.generation_error.action_mapitem import ACTION_MAPITEM, ERROR_CHARACTER_MAPITEM
-from common.constants import COMPILE_TMP_PATH, RANDOM_C_ERROR_RECORDS, FAKE_C_COMPILE_ERROR_DATA_DBPATH, COMMON_C_ERROR_RECORDS
+from common.constants import COMPILE_TMP_PATH, RANDOM_C_ERROR_RECORDS, FAKE_C_COMPILE_ERROR_DATA_DBPATH, \
+    COMMON_C_ERROR_RECORDS, COMMON_DEEPFIX_ERROR_RECORDS
+from config import FAKE_DEEPFIX_ERROR_DATA_DBPATH
 from error_generation.generation_error.error_action_reducer import create_error_action_fn
-from read_data.read_filter_data_records import read_distinct_problem_user_ac_c_records_filter_error_code
+from read_data.read_experiment_data import read_deepfix_ac_data
+from read_data.read_filter_data_records import read_distinct_problem_user_ac_c_records_filter_error_code, \
+    read_deepfix_ac_records
 from database.database_util import insert_items, create_table, run_sql_select_statment
 from common.util import init_code, compile_c_code_by_gcc, build_code_string_from_lex_tokens
 from common.analyse_include_util import replace_include_with_blank, extract_include, analyse_include_line_no, \
@@ -24,7 +28,8 @@ preprocess_logger = logging.getLogger('code_preprocess')
 preprocess_logger.setLevel(logging.DEBUG)
 preprocess_logger.__setattr__('propagate', False)
 # 创建一个输出日志到控制台的StreamHandler
-hdr = logging.StreamHandler()
+# hdr = logging.StreamHandler()
+hdr = logging.FileHandler("log/generate_deepfix_common_error.log")
 formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
 hdr.setFormatter(formatter)
 # 给logger添加上handler
@@ -34,17 +39,18 @@ compile_max_count = 1
 error_max_count = 1
 failed_max_count = 1
 
-current_table_name = RANDOM_C_ERROR_RECORDS
+current_table_name = COMMON_DEEPFIX_ERROR_RECORDS
+db_name = FAKE_DEEPFIX_ERROR_DATA_DBPATH
 
 def preprocess():
     # initLogging()
     preprocess_logger.info("Start Read Code Data")
-    code_df = read_distinct_problem_user_ac_c_records_filter_error_code()
+    code_df = read_deepfix_ac_data()
     preprocess_logger.info("Code Data Read Finish. Total: {}".format(code_df.shape[0]))
     que_read = mp.Queue()
     que_write = mp.Queue()
 
-    create_table(db_full_path=FAKE_C_COMPILE_ERROR_DATA_DBPATH, table_name=current_table_name)
+    create_table(db_full_path=db_name, table_name=current_table_name)
     pros = []
     for i in range(6):
         pro = mp.Process(target=make_fake_code, args=(que_read, que_write, i))
@@ -58,14 +64,8 @@ def preprocess():
     items = []
     for index, row in code_df.iterrows():
         count += 1
-
-        item = {'try_count': 0}
-        item['id'] = row['id']
-        item['submit_url'] = row['submit_url']
-        item['problem_id'] = row['problem_id']
-        item['user_id'] = row['user_id']
-        item['problem_user_id'] = row['problem_user_id']
-        item['originalcode'] = row['code'].replace('\ufeff', '').replace('\u3000', ' ')
+        # item = create_codeforce_item(row)
+        item = create_deepfix_item(row)
         items.append(item)
 
         ids.append(item['problem_user_id'])
@@ -84,9 +84,33 @@ def preprocess():
     save_pro.join()
 
 
+def create_codeforce_item(row):
+    # for codeforce code
+    item = {'try_count': 0}
+    item['id'] = row['id']
+    item['submit_url'] = row['submit_url']
+    item['problem_id'] = row['problem_id']
+    item['user_id'] = row['user_id']
+    item['problem_user_id'] = row['problem_user_id']
+    item['originalcode'] = row['code'].replace('\ufeff', '').replace('\u3000', ' ')
+    return item
+
+
+def create_deepfix_item(row):
+    # for deepfix code
+    item = {'try_count': 0}
+    item['id'] = row['code_id']
+    item['submit_url'] = ''
+    item['problem_id'] = row['problem_id']
+    item['user_id'] = row['user_id']
+    item['problem_user_id'] = row['problem_id'] + '_' +row['user_id']
+    item['originalcode'] = row['code'].replace('\ufeff', '').replace('\u3000', ' ')
+    return item
+
+
 def push_code_to_queue(que, ids, items):
     ids = ["'" + t + "'" for t in ids]
-    result_list = run_sql_select_statment(db_full_path=FAKE_C_COMPILE_ERROR_DATA_DBPATH, table_name=current_table_name, sql_name='find_distinct_problem_user_id')
+    result_list = run_sql_select_statment(db_full_path=db_name, table_name=current_table_name, sql_name='find_distinct_problem_user_id')
     ids_repeat = [row[0] for row in result_list]
     count = 0
     for it in items:
@@ -99,7 +123,7 @@ def push_code_to_queue(que, ids, items):
 
 def make_fake_code(que_read:mp.Queue, que_write:mp.Queue, ind:int):
     preprocess_logger.info('Start Make Fake Code Process {}'.format(ind))
-    tmp_code_file_path = os.path.join(COMPILE_TMP_PATH, 'code'+str(ind)+'.cpp')
+    tmp_code_file_path = os.path.join(COMPILE_TMP_PATH, 'code'+str(ind)+'.c')
     timeout_count = 0
     count = 0
     success_count = 0
@@ -135,7 +159,7 @@ def make_fake_code(que_read:mp.Queue, que_write:mp.Queue, ind:int):
         try:
             before_code, after_code, action_maplist, error_character_maplist, error_count = preprocess_code(item['originalcode'], cpp_file_path=tmp_code_file_path, tokenize_fn=tokenize_fn)
         except Exception as e:
-            preprocess_logger.info('error info: ', e)
+            preprocess_logger.info('error info: ' + str(e))
             before_code = None
             after_code = None
             action_maplist = None
@@ -167,7 +191,7 @@ def make_fake_code(que_read:mp.Queue, que_write:mp.Queue, ind:int):
 
 
 def save_fake_code(que:mp.Queue, all_data_count):
-    create_table(db_full_path=FAKE_C_COMPILE_ERROR_DATA_DBPATH, table_name=current_table_name)
+    create_table(db_full_path=db_name, table_name=current_table_name)
     que.qsize()
     preprocess_logger.info('Start Save Fake Code Process. all data count: {}'.format(all_data_count))
     count = 0
@@ -192,14 +216,14 @@ def save_fake_code(que:mp.Queue, all_data_count):
             preprocess_logger.info('save data count: {}. current count: {}, Wait item: {}, Que is Empty: {}'.format(count, len(param), que.qsize(), que.empty()))
             if len(param) > 1000:
                 preprocess_logger.info('Save {} recode. Total record: {}. error count: {}. Wait item: {}'.format(len(param), count, error_count, que.qsize()))
-                insert_items(db_full_path=FAKE_C_COMPILE_ERROR_DATA_DBPATH, table_name=current_table_name, params=dict_to_list(param))
+                insert_items(db_full_path=db_name, table_name=current_table_name, params=dict_to_list(param))
                 param = []
         elif que.empty() and count >= all_data_count:
             break
         elif que.qsize() <= 0:
             time.sleep(1)
     preprocess_logger.info('Save {} recode. Total record: {}. error count: {}. Wait item: {}'.format(len(param), count, error_count, que.qsize()))
-    insert_items(db_full_path=FAKE_C_COMPILE_ERROR_DATA_DBPATH, table_name=current_table_name, params=dict_to_list(param))
+    insert_items(db_full_path=db_name, table_name=current_table_name, params=dict_to_list(param))
     preprocess_logger.info('End Save Fake Code Process')
 
 

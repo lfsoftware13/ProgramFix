@@ -135,6 +135,16 @@ def read_deepfix_error_records():
     return test_df
 
 
+@disk_cache(basename='read_deepfix_ac_records', directory=CACHE_DATA_PATH)
+def read_deepfix_ac_records():
+    test_df = read_deepfix_records()
+    test_df = test_df[test_df['errorcount'].map(lambda x: x == 0)]
+    test_df['code'] = test_df['code'].map(init_code)
+    # test_df['code'] = test_df['code'].map(replace_include_with_blank)
+    print('original length: {}'.format(len(test_df)))
+    return test_df
+
+
 @disk_cache(basename='read_filter_grammar_sample_train_records', directory=CACHE_DATA_PATH)
 def read_filter_grammar_sample_train_records():
     data_df = read_slk_grammar_sample_train_records()

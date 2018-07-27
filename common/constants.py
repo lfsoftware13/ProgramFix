@@ -30,6 +30,7 @@ SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME = 'slk_sample_common_c_error_records'
 SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN = 'slk_sample_common_c_error_records_train'
 SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID = 'slk_sample_common_c_error_records_valid'
 SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST = 'slk_sample_common_c_error_records_test'
+COMMON_DEEPFIX_ERROR_RECORDS = 'common_deepfix_error_records'
 
 # code status and language transform dict
 verdict = {'OK': 1, 'REJECTED': 2, 'WRONG_ANSWER': 3, 'RUNTIME_ERROR': 4, 'TIME_LIMIT_EXCEEDED': 5, 'MEMORY_LIMIT_EXCEEDED': 6,
