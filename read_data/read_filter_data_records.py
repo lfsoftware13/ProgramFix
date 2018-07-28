@@ -1,7 +1,10 @@
+from common.analyse_include_util import remove_include
 from read_data.read_data_from_db import read_train_data_effect_all_c_error_records, read_train_data_all_c_error_records, \
     read_compile_success_c_records, read_fake_common_c_error_records, read_fake_random_c_error_records, \
-    read_deepfix_records
-from common.util import disk_cache, compile_c_code_by_gcc_c89, group_df_to_grouped_list, init_code
+    read_deepfix_records, read_slk_grammar_sample_train_records, read_slk_grammar_sample_valid_records, \
+    read_slk_grammar_sample_test_records
+from common.util import disk_cache, compile_c_code_by_gcc_c89, group_df_to_grouped_list, init_code, \
+    check_ascii_character
 from common.constants import CACHE_DATA_PATH
 
 
@@ -130,6 +133,52 @@ def read_deepfix_error_records():
     # test_df['code'] = test_df['code'].map(replace_include_with_blank)
     print('original length: {}'.format(len(test_df)))
     return test_df
+
+
+@disk_cache(basename='read_deepfix_ac_records', directory=CACHE_DATA_PATH)
+def read_deepfix_ac_records():
+    test_df = read_deepfix_records()
+    test_df = test_df[test_df['errorcount'].map(lambda x: x == 0)]
+    test_df['code'] = test_df['code'].map(init_code)
+    # test_df['code'] = test_df['code'].map(replace_include_with_blank)
+    print('original length: {}'.format(len(test_df)))
+    return test_df
+
+
+@disk_cache(basename='read_filter_grammar_sample_train_records', directory=CACHE_DATA_PATH)
+def read_filter_grammar_sample_train_records():
+    data_df = read_slk_grammar_sample_train_records()
+    data_df = data_df[data_df['distance'].map(lambda x: 0 < x < 10)]
+    data_df['original_error_code'] = data_df['code']
+    data_df['code'] = data_df['sample_code']
+    data_df['similar_code'] = data_df['similar_code'].map(init_code)
+    data_df['similar_code'] = data_df['similar_code'].map(remove_include).map(lambda x: x.replace('\r', ''))
+    data_df = data_df[data_df['similar_code'].map(lambda x: x != '')]
+    return data_df
+
+
+@disk_cache(basename='read_filter_grammar_sample_valid_records', directory=CACHE_DATA_PATH)
+def read_filter_grammar_sample_valid_records():
+    data_df = read_slk_grammar_sample_valid_records()
+    data_df = data_df[data_df['distance'].map(lambda x: 0 < x < 10)]
+    data_df['original_error_code'] = data_df['code']
+    data_df['code'] = data_df['sample_code']
+    data_df['similar_code'] = data_df['similar_code'].map(init_code)
+    # data_df['similar_code'] = data_df['similar_code'].map(remove_include).map(lambda x: x.replace('\r', ''))
+    data_df = data_df[data_df['similar_code'].map(lambda x: x != '')]
+    return data_df
+
+
+@disk_cache(basename='read_filter_grammar_sample_test_records', directory=CACHE_DATA_PATH)
+def read_filter_grammar_sample_test_records():
+    data_df = read_slk_grammar_sample_test_records()
+    data_df = data_df[data_df['distance'].map(lambda x: 0 < x < 10)]
+    data_df['original_error_code'] = data_df['code']
+    data_df['code'] = data_df['sample_code']
+    data_df['similar_code'] = data_df['similar_code'].map(init_code)
+    data_df['similar_code'] = data_df['similar_code'].map(remove_include).map(lambda x: x.replace('\r', ''))
+    data_df = data_df[data_df['similar_code'].map(lambda x: x != '')]
+    return data_df
 
 
 if __name__ == '__main__':

@@ -336,7 +336,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                        evaluate_obj_list=evaluate_obj_list,
                                                        expand_output_and_target_fn=expand_output_and_target_fn,
                                                        add_data_record_fn=add_data_record_fn,
-                                                       db_path=db_path, table_name=table_basename+'_train')
+                                                       db_path=db_path, table_name=table_basename+'_test')
             print('sample and save evaluator : '.format(sample_test_loss))
             for evaluator in sample_and_save_evalutor:
                 print(evaluator)
@@ -365,7 +365,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                        expand_output_and_target_fn=expand_output_and_target_fn,
                                                        add_data_record_fn=add_data_record_fn,
                                                        db_path=db_path,
-                                                       table_name=table_basename+'_test')
+                                                       table_name=table_basename+'_train')
             print('sample and save evaluator : '.format(sample_test_loss))
             for evaluator in sample_and_save_evalutor:
                 print(evaluator)

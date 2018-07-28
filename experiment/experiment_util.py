@@ -7,12 +7,34 @@ from common.util import disk_cache
 from experiment.parse_xy_util import parse_error_tokens_and_action_map, parse_test_tokens, \
     parse_output_and_position_map, parse_error_tokens_and_action_map_encoder_copy
 from read_data.load_data_vocabulary import create_common_error_vocabulary
-from read_data.read_experiment_data import read_fake_common_c_error_dataset_with_limit_length, read_deepfix_error_data
+from read_data.read_experiment_data import read_fake_common_c_error_dataset_with_limit_length, read_deepfix_error_data, \
+    read_grammar_sample_error_data
 
 import pandas as pd
 
 
 MAX_TOKEN_LENGTH = 500
+
+
+
+def load_grammar_sample_common_error_data():
+    """
+    not finish
+    :return:
+    """
+    vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>',
+                                           addition_tokens=['<GAP>'])
+    train_df, valid_df, test_df = read_grammar_sample_error_data()
+    train_df = convert_c_code_fields_to_cpp_fields(train_df, convert_include=False)
+    valid_df = convert_c_code_fields_to_cpp_fields(valid_df, convert_include=False)
+    test_df = convert_c_code_fields_to_cpp_fields(test_df, convert_include=False)
+
+    tokenize_fn = tokenize_by_clex_fn()
+
+
+
+
+
 
 
 @disk_cache(basename='load_common_error_data', directory=CACHE_DATA_PATH)
@@ -217,6 +239,8 @@ def add_c_common_code_original_info(data_dict, df):
     data_dict['problem_user_id'] = df['problem_user_id']
     data_dict['code'] = df['code']
     data_dict['similar_code'] = df['similar_code']
+    data_dict['original_modify_action_list'] = df['modify_action_list']
+    data_dict['original_distance'] = df['distance']
     return data_dict
 
 
@@ -285,13 +309,14 @@ def convert_action_map_to_old_action(actions):
     return old_actions
 
 
-def convert_c_code_fields_to_cpp_fields(df):
+def convert_c_code_fields_to_cpp_fields(df, convert_include=True):
     filter_macro_fn = lambda code: not (code.find('define') != -1 or code.find('defined') != -1 or
                                         code.find('undef') != -1 or code.find('pragma') != -1 or
                                         code.find('ifndef') != -1 or code.find('ifdef') != -1 or
                                         code.find('endif') != -1)
     df['action_character_list'] = df['modify_action_list'].map(convert_action_map_to_old_action)
-    df['includes'] = df['similar_code'].map(extract_include)
+    if convert_include:
+        df['includes'] = df['similar_code'].map(extract_include)
     df['similar_code_without_include'] = df['similar_code'].map(replace_include_with_blank)
     df['ac_code'] = df['similar_code_without_include']
     df['error_count'] = df['distance']
