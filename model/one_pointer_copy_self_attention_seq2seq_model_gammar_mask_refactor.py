@@ -405,8 +405,8 @@ class RNNPointerNetworkModelWithSLKMask(nn.Module):
                 value_output.masked_fill_(~decode_mask.view(decode_mask.shape[0], decode_mask.shape[1], *[1 for i in range(len(value_output.shape)-2)]), 0)
         return is_copy, value_output, pointer_output, hidden
 
-    def forward(self, inputs, input_mask, output, output_mask, inputs_list, value_mask_set_tensor, mask_mask=None, pointer_encoder_mask=None, test=False):
-        if test:
+    def forward(self, inputs, input_mask, output, output_mask, inputs_list, value_mask_set_tensor, mask_mask=None, pointer_encoder_mask=None, do_sample=False):
+        if do_sample:
             return self.forward_dynamic_test(inputs, input_mask, inputs_list)
 
         # output_length = to_cuda(torch.sum(output_mask, dim=-1))

@@ -710,7 +710,7 @@ def evaluate(model, dataset, batch_size, loss_function, vocab, do_sample=False, 
                                                          transformer=transformer)
                 # is_copy, value_output, pointer_output = model.forward(*model_input)
                 if do_sample:
-                    _, is_copy, value_output, pointer_output = model.forward(*model_input, test=True)
+                    _, is_copy, value_output, pointer_output = model.forward(*model_input, do_sample=True)
 
                     model_target = parse_target_batch_data(batch_data)
                     target_is_copy, target_pointer_output, target_value_output, target_ac_tokens, output_mask = model_target
@@ -858,7 +858,7 @@ def evaluate_multi_step(model, dataset, batch_size, vocab, do_sample=False, prin
                     # error_tokens, input_mask, ac_tokens, output_mask = model_input
                     # is_copy, value_output, pointer_output = model.forward(*model_input)
                     if do_sample:
-                        _, is_copy, value_output, pointer_output = model.forward(*model_input, test=True)
+                        _, is_copy, value_output, pointer_output = model.forward(*model_input, do_sample=True)
                     else:
                         is_copy, value_output, pointer_output = model.forward(*model_input)
                     output_ids = create_output_ids(is_copy, value_output, pointer_output, model_input[0], model_input[4])
@@ -1056,7 +1056,7 @@ def sample_better_output(model, dataset, batch_size, vocab, do_sample=False, epo
                 target_is_copy, target_pointer_output, target_value_output, target_ac_tokens, output_mask = model_target
                 # is_copy, value_output, pointer_output = model.forward(*model_input)
                 if do_sample:
-                    _, is_copy, value_output, pointer_output = model.forward(*model_input, test=True)
+                    _, is_copy, value_output, pointer_output = model.forward(*model_input, do_sample=True)
                     predict_len = is_copy.shape[1]
                     target_len = target_is_copy.shape[1]
                     expand_len = max(predict_len, target_len)

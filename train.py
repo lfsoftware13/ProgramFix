@@ -92,7 +92,7 @@ def evaluate(model, dataset, batch_size, loss_function, parse_input_batch_data_f
                 model_input = parse_input_batch_data_fn(batch_data, do_sample=do_sample)
                 # model_output = model.forward(*model_input, test=do_sample)
                 if do_sample:
-                    model_output = model.forward(*model_input, test=True)
+                    model_output = model.forward(*model_input, do_sample=True)
 
                     model_target = parse_target_batch_data_fn(batch_data)
 
@@ -190,7 +190,7 @@ def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch
                 model_input = parse_input_batch_data_fn(batch_data, do_sample=do_sample)
                 # model_output = model.forward(*model_input, test=do_sample)
                 if do_sample:
-                    model_output = model.forward(*model_input, test=True)
+                    model_output = model.forward(*model_input, do_sample=True)
 
                     model_target = parse_target_batch_data_fn(batch_data)
 

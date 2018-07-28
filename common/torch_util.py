@@ -3,6 +3,7 @@ from collections import OrderedDict
 from itertools import islice
 
 import torch.nn.functional as F
+from torch import nn, nn as nn
 import torch
 import typing
 from torch.nn.modules.rnn import RNNCellBase
@@ -267,10 +268,7 @@ def create_sequence_length_mask(token_length, max_len=None, gpu_index=None):
     if max_len is None:
         max_len = torch.max(token_length).item()
     idxes = torch.arange(0, max_len, out=torch.Tensor(max_len)).unsqueeze(0)  # some day, you'll be able to directly do this on cuda
-    if gpu_index is not None:
-        idxes = idxes.cuda(gpu_index)
-    else:
-        idxes = to_cuda(idxes)
+    idxes = idxes.to(token_length.device)
     # mask = autograd.Variable((trans_to_cuda(idxes) < token_length.unsqueeze(1)).float())
     mask = (idxes < token_length.unsqueeze(1).float())
     return mask
@@ -375,6 +373,33 @@ def pad_last_dim_of_tensor_list(tensor_list, max_len=None, fill_value=0):
     padded_tensor_list = [F.pad(tensor, (0, max_len-one_len), 'constant', fill_value) for tensor, one_len in zip(tensor_list, total_len)]
     return padded_tensor_list
 
+
+class Update(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.update_value = nn.Linear(2*hidden_size, hidden_size)
+        self.update_gate = nn.Linear(2*hidden_size, hidden_size)
+
+    def forward(self, original_value, to_update_value):
+        x = torch.cat((original_value, to_update_value), dim=-1)
+        update_value = F.tanh(self.update_value(x))
+        update_gate = F.sigmoid(self.update_gate(x))
+        return original_value*(1-update_gate) + update_value*update_gate
+
+
+class MaskOutput(nn.Module):
+    def __init__(self,
+                 hidden_state_size,
+                 vocabulary_size):
+        super().__init__()
+        self.embedding = nn.Embedding(vocabulary_size, hidden_state_size)
+
+    def forward(self, input_seq, grammar_index, grammar_mask, ):
+        weight = self.embedding(grammar_index).permute(0, 2, 1)
+        input_seq = input_seq.unsqueeze(1)
+        o = torch.bmm(input_seq, weight).squeeze(1)
+        o.data.masked_fill_(~grammar_mask, -float('inf'))
+        return o
 
 
 if __name__ == '__main__':

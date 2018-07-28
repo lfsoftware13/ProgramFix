@@ -1,22 +1,14 @@
-import os
-import random
-
 import torch.nn as nn
 import torch
-import math
-import torch.nn.functional as F
 import pandas as pd
-from torch.utils.data import Dataset
 import more_itertools
 
-from c_parser.slk_parser import PackedDynamicSLKParser
 from common import util
 from common.problem_util import to_cuda
-from common.torch_util import create_sequence_length_mask
+from common.torch_util import create_sequence_length_mask, MaskOutput
 from common.util import CustomerDataSet, PaddedList
 from seq2seq.models import EncoderRNN, DecoderRNN
 from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
-from vocabulary.word_vocabulary import Vocabulary
 
 
 class CCodeDataset(CustomerDataSet):
@@ -131,21 +123,6 @@ def create_loss_fn(ignore_id):
     return loss_fn
 
 
-class GrammarMaskOutput(nn.Module):
-    def __init__(self,
-                 hidden_state_size,
-                 vocabulary_size):
-        super().__init__()
-        self.embedding = nn.Embedding(vocabulary_size, hidden_state_size)
-
-    def forward(self, input_seq, grammar_index, grammar_mask, ):
-        weight = self.embedding(grammar_index).permute(0, 2, 1)
-        input_seq = input_seq.unsqueeze(1)
-        o = torch.bmm(input_seq, weight).squeeze(1)
-        o.data.masked_fill_(~grammar_mask, -float('inf'))
-        return o
-
-
 def create_output_ids_fn(model_output, model_input, do_sample):
     if not do_sample:
         fragment_output = model_output[1]
@@ -181,7 +158,7 @@ class Seq2SeqEncoderCopyModel(nn.Module):
                                   bidirectional=False, input_dropout_p=self.dropout_p, dropout_p=self.dropout_p,
                                   use_attention=True)
         self.is_copy_output = nn.Linear(hidden_state_size, 1)
-        self.grammar_mask_output = GrammarMaskOutput(hidden_state_size, vocabulary_size)
+        self.grammar_mask_output = MaskOutput(hidden_state_size, vocabulary_size)
         self.decoder_start = torch.ones(1, 1)*start_label
         self.pad_label = pad_label
         self.MAX_LENGTH = MAX_LENGTH
