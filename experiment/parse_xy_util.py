@@ -7,6 +7,7 @@ import more_itertools
 
 from c_parser.pycparser.pycparser.ply.lex import LexToken
 from common.analyse_include_util import extract_include, replace_include_with_blank
+from common.constants import pre_defined_c_label, pre_defined_c_library_tokens
 from common.util import PaddedList
 from torch.nn import functional as F
 
@@ -311,11 +312,279 @@ def parse_error_tokens_and_action_map_encoder_copy(df, data_type, keyword_vocab,
            df['distance'], df['ac_code_target_id'], df['ac_code_target']
 
 
+CODE_BEGIN = '<BEGIN>'
+CODE_END = '<END>'
+
 def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_fn=None, tokenize_fn=None):
+    df['res'] = ''
+    df['ac_code_obj'] = df['ac_code'].map(tokenize_fn)
+    df = df[df['ac_code_obj'].map(lambda x: x is not None)].copy()
+    df['ac_code_obj'] = df['ac_code_obj'].map(list)
+    print('after tokenize: ', len(df.index))
 
-    pass
+    df['ac_code_name'] = df['ac_code_obj'].map(create_name_list_by_LexToken)
+    df['action_token_list'] = df['action_character_list'].map(json.loads)
+
+    # sort and filter action list
+    if sort_fn is not None:
+        df['action_token_list'] = df['action_token_list'].map(sort_fn)
+    print('before filter action: {}'.format(len(df['action_token_list'])))
+    df['action_token_list'] = df['action_token_list'].map(filter_repeat_action_list)
+    df = df[df['action_token_list'].map(lambda x: x is not None)]
+    print('after filter action: {}'.format(len(df['action_token_list'])))
+
+    # add begin and end to ac code
+    df['ac_code_name_with_labels'] = df['ac_code_name'].map(add_begin_end_label)
+    df['ac_code_id_with_labels'] = df['ac_code_name_with_labels'].map(
+        create_one_token_id_by_name_fn(keyword_voc=keyword_vocab))
+    df['offset_action_token_list'] = df['action_token_list'].map(action_offset_with_begin_and_end)
+    print('after action_offset_with_begin_and_end: {}'.format(len(df)))
+
+    df['action_part_list'] = df['offset_action_token_list'].map(split_actions)
+    print('after split_actions : {}'.format(len(df)))
+
+    # generate action part pos list
+    action_bias_map = {INSERT: 1, DELETE: -1, CHANGE: 0}
+    pos_res = df['action_part_list'].map(
+        extract_action_part_start_pos_fn(action_bias_map=action_bias_map))
+    ac_pos_list, error_pos_list = list(zip(*pos_res))
+    df['ac_pos_list'] = ac_pos_list
+    df['error_pos_list'] = error_pos_list
+    print('after extract_action_part_start_pos_fn : {}'.format(len(df)))
+
+    # create input code and sample code according to action part and ac pos and error pos
+    df = df.apply(create_sample_error_position_with_iterate, raw=True, axis=1)
+    print('after create_sample_error_position_with_iterate : {}'.format(len(df)))
+
+    # convert input code to id
+    df = df.apply(create_token_id_input, raw=True, axis=1, keyword_voc=keyword_vocab)
+    df = df[df['res'].map(lambda x: x is not None)]
+    print('after create_token_id_input : {}'.format(len(df)))
+
+    # convert sample code to id
+    sample_res = df['sample_ac_code_list'].map(create_token_ids_by_name_fn(keyword_voc=keyword_vocab))
+    sample_ac_id_list, sample_ac_len_list = list(zip(*sample_res))
+    df['sample_ac_id_list'] = sample_ac_id_list
+    df['sample_ac_len_list'] = sample_ac_len_list
+    df = df[df['sample_ac_id_list'].map(lambda x: x is not None)]
+    print('after sample_ac_id_list : {}'.format(len(df)))
+
+    sample_res = df['sample_error_code_list'].map(create_token_ids_by_name_fn(keyword_voc=keyword_vocab))
+    sample_error_id_list, sample_error_len_list = list(zip(*sample_res))
+    df['sample_error_id_list'] = sample_error_id_list
+    df['sample_error_len_list'] = sample_error_len_list
+    df = df[df['sample_error_id_list'].map(lambda x: x is not None)]
+    print('after sample_error_id_list : {}'.format(len(df)))
+
+    keyword_ids = create_effect_keyword_ids_set(keyword_vocab)
+
+    create_input_ids_set_fn = lambda x: list(keyword_ids | set(x[1:-1]))
+    df['sample_mask_list'] = df['ac_code_id_with_labels'].map(create_input_ids_set_fn)
+
+    df = df.apply(create_sample_is_copy, raw=True, axis=1, keyword_ids=keyword_ids)
+    print('after create_sample_is_copy : {}'.format(len(df)))
+
+    return df['token_id_list'], df['sample_error_id_list'], df['sample_ac_id_list'], df['ac_pos_list'], \
+           df['error_pos_list'], df['ac_code_id_with_labels'], df['is_copy_list'], df['copy_pos_list'], \
+           df['sample_mask_list']
 
 
+def create_effect_keyword_ids_set(keyword_vocab):
+    keyword = pre_defined_c_label | pre_defined_c_library_tokens
+    effect_vocabulary_word = keyword_vocab.word_to_id_dict.keys()
+    keyword_ids = [keyword_vocab.word_to_id(key) if key in effect_vocabulary_word else None for key in keyword]
+    keyword_ids = set(filter(lambda x: x is not None, keyword_ids))
+    return keyword_ids
+
+
+def create_sample_is_copy(one, keyword_ids):
+    sample_ac_id_list = one['sample_ac_id_list']
+    token_id_list = one['token_id_list']
+
+    is_copy_list = []
+    copy_pos_list = []
+    for sample_ac, token_ids in zip(sample_ac_id_list, token_id_list):
+        is_copys = []
+        copy_poses = []
+        for ac_id in sample_ac:
+            if ac_id in keyword_ids:
+                copy_pos = -1
+                is_copy = 0
+            else:
+                try:
+                    copy_pos = token_ids.index(ac_id)
+                    is_copy = 1
+                except ValueError as e:
+                    copy_pos = -1
+                    is_copy = 0
+            is_copys = is_copys + [is_copy]
+            copy_poses = copy_poses + [copy_pos]
+        is_copy_list = is_copy_list + [is_copys]
+        copy_pos_list = copy_pos_list + [copy_poses]
+    one['is_copy_list'] = is_copy_list
+    one['copy_pos_list'] = copy_pos_list
+    return one
+
+
+def create_sample_error_position_with_iterate(one):
+
+    def cal_token_pos_bias(action_list, cur_action):
+        bias = 0
+        cur_token_pos = cur_action['token_pos']
+        for act in action_list:
+            if act['act_type'] == INSERT and (
+                    cur_action['act_type'] == DELETE or cur_action['act_type'] == CHANGE) and cur_token_pos >= act['token_pos']:
+                bias += 1
+            elif act['act_type'] == INSERT and cur_token_pos > act['token_pos']:
+                bias += 1
+            elif act['act_type'] == DELETE and cur_token_pos > act['token_pos']:
+                bias -= 1
+        return bias
+
+    def calculate_last_error_token(last_ac_tokens, action_list):
+        token_bias_list = [cal_token_pos_bias(action_list[0:i], action_list[i]) for i in range(len(action_list))]
+        for act, token_bias in zip(action_list, token_bias_list):
+            ac_type = act['act_type']
+            ac_token_pos = act['token_pos']
+            real_token_pos = ac_token_pos + token_bias
+            if ac_type == INSERT:
+                to_char = act['to_char']
+                last_ac_tokens = last_ac_tokens[0:real_token_pos] + [to_char] + last_ac_tokens[real_token_pos:]
+            elif ac_type == DELETE:
+                # from_char = act['from_char']
+                last_ac_tokens = last_ac_tokens[0: real_token_pos] + last_ac_tokens[real_token_pos + 1:]
+            elif ac_type == CHANGE:
+                # from_char = act['from_char']
+                to_char = act['to_char']
+                last_ac_tokens = last_ac_tokens[0: real_token_pos] + [to_char] + last_ac_tokens[real_token_pos + 1:]
+        return last_ac_tokens
+
+    # add begin and end label of tokens and actions
+    # ac_code_name_with_labels = one['ac_code_name_with_labels']
+    iterate_ac_code_name_with_labels = one['ac_code_name_with_labels']
+
+    action_part_list = one['action_part_list']
+
+    code_token_list = []
+    ac_pos_list = one['ac_pos_list']
+    error_pos_list = one['error_pos_list']
+    sample_ac_code_list = []
+    sample_error_code_list = []
+
+
+    for i in range(len(action_part_list)-1, -1, -1):
+        one_action_part = action_part_list[i]
+        ac_pos = ac_pos_list[i]
+        error_pos = error_pos_list[i]
+
+        iterate_sample_ac_code = iterate_ac_code_name_with_labels[ac_pos[0]+1: ac_pos[1]]
+        sample_ac_code_list = [iterate_sample_ac_code] + sample_ac_code_list
+        # print('for {}'.format(i))
+        # print(one_action_part)
+        # print(iterate_ac_code_name_with_labels[ac_pos[0]+1: ac_pos[1]])
+        # print(iterate_ac_code_name_with_labels)
+        iterate_ac_code_name_with_labels = calculate_last_error_token(iterate_ac_code_name_with_labels, one_action_part)
+        # print(iterate_ac_code_name_with_labels)
+        # print(iterate_ac_code_name_with_labels[error_pos[0]+1: error_pos[1]])
+
+        iterate_sample_error_code = iterate_ac_code_name_with_labels[error_pos[0]+1: error_pos[1]]
+        sample_error_code_list = [iterate_sample_error_code] + sample_error_code_list
+
+        code_token_list = [iterate_ac_code_name_with_labels] + code_token_list
+        # ac_pos_list = [ac_pos] + ac_pos_list
+        # error_pos_list = [error_pos] + error_pos_list
+
+    one['token_name_list'] = code_token_list
+    one['sample_ac_code_list'] = sample_ac_code_list
+    one['sample_error_code_list'] = sample_error_code_list
+
+    return one
+
+
+# tools method
+def add_begin_end_label(tokens):
+    """
+    add begin and end token
+    :param tokens:
+    :return:
+    """
+    tokens = [CODE_BEGIN] + tokens + [CODE_END]
+    return tokens
+
+
+def action_offset_with_begin_and_end(action_list):
+    for action in action_list:
+        action['token_pos'] += 1
+    return action_list
+
+
+def check_neighbor_two_action(before_action, after_action):
+    before_type = before_action['act_type']
+    before_pos = before_action['token_pos']
+    if before_type == INSERT:
+        before_pos = before_pos - 0.5
+    after_type = after_action['act_type']
+    after_pos = after_action['token_pos']
+    if after_type != INSERT and 0 < after_pos - before_pos <=1:
+        return True
+    if after_type == INSERT and 0 < after_pos - before_pos <=1:
+        return True
+    return False
+
+
+def split_actions(ac_to_error_action_list):
+    """
+
+    :param ac_to_error_action_list: action list has been sorted
+    :return:
+    """
+    action_part_list = []
+    last_action = None
+    for i in range(len(ac_to_error_action_list)-1, -1, -1):
+        cur_action = ac_to_error_action_list[i]
+        if last_action is None:
+            action_part_list = [[cur_action]] + action_part_list
+        else:
+            is_neighbor = check_neighbor_two_action(cur_action, last_action)
+            if is_neighbor:
+                action_part_list[0] = [cur_action] + action_part_list[0]
+            else:
+                action_part_list = [[cur_action]] + action_part_list
+        last_action = cur_action
+    return action_part_list
+
+
+def extract_action_part_start_pos_fn(action_bias_map):
+
+    def extract_actions_start_pos(action_parts):
+        ac_pos_list = []
+        error_pos_list = []
+        for i in range(len(action_parts) - 1, -1, -1):
+            ac_pos, error_pos = extract_one_part_start_pos(action_parts[i])
+            ac_pos_list = [ac_pos] + ac_pos_list
+            error_pos_list = [error_pos] + error_pos_list
+        return ac_pos_list, error_pos_list
+
+    def extract_one_part_start_pos(one_part):
+        start_pos = one_part[0]['token_pos']-1
+        if one_part[-1]['act_type'] != INSERT:
+            end_ac_pos = one_part[-1]['token_pos'] + 1
+        else:
+            end_ac_pos = one_part[-1]['token_pos']
+        error_bias = [action_bias_map[action['act_type']] for action in one_part]
+        end_error_pos = end_ac_pos + sum(error_bias)
+        return (start_pos, end_ac_pos), (start_pos, end_error_pos)
+
+    return extract_actions_start_pos
+
+
+def filter_repeat_action_list(action_token_list):
+    token_pos_list = [act['token_pos'] if act['act_type'] != INSERT else -1 for act in action_token_list]
+    token_pos_list = list(filter(lambda x: x != -1, token_pos_list))
+    has_repeat_action_fn = lambda x: len(set(x)) < len(x)
+    if has_repeat_action_fn(token_pos_list):
+        return None
+    return action_token_list
 
 
 def parse_output_and_position_map(error_ids, ac_ids, original_distance):
@@ -346,6 +615,27 @@ def create_token_id_input(one, keyword_voc):
     return one
 
 
+def create_token_ids_by_name_fn(keyword_voc):
+    def create_token_ids_by_name(token_name_list):
+        token_id_list = []
+        len_list = []
+        for name_list in token_name_list:
+            id_list = keyword_voc.parse_text([name_list], False)[0]
+            if id_list == None:
+                return None, None
+            token_id_list.append(id_list)
+            len_list.append(len(id_list))
+        return token_id_list, len_list
+    return create_token_ids_by_name
+
+
+def create_one_token_id_by_name_fn(keyword_voc):
+    def create_one_token_id_by_name(name_list):
+        id_list = keyword_voc.parse_text([name_list], False)[0]
+        if id_list == None:
+            return None
+        return id_list
+    return create_one_token_id_by_name
 
 def create_error_list(one, sort_fn=None):
     import json

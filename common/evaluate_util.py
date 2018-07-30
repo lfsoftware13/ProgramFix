@@ -2,6 +2,12 @@ from abc import abstractmethod, ABCMeta
 
 import torch
 
+from common.problem_util import to_cuda
+from common.torch_util import expand_tensor_sequence_to_same
+from common.util import PaddedList
+
+import torch.nn.functional as F
+
 
 class Evaluator(metaclass=ABCMeta):
     @abstractmethod
@@ -597,3 +603,53 @@ class EncoderCopyAccuracyAndCorrect(Evaluator):
         return "is_copy evaluate:{}, sample evaluate:{}, all evaluate:{}".format(is_copy_res,
                                                                                  sample_res,
                                                                                  all_res)
+
+
+class ErrorPositionAndValueAccuracy(Evaluator):
+    def __init__(self, ignore_token=None):
+        self.ignore_token = ignore_token
+        self.is_copy_accuracy = TokenAccuracy(ignore_token=ignore_token)
+        self.position_correct = SequenceCorrect(ignore_token=ignore_token)
+        self.output_accuracy = TokenAccuracy(ignore_token=ignore_token)
+        self.all_correct = SequenceCorrect(ignore_token=ignore_token)
+
+    def add_result(self, output, model_output, model_target, model_input, ignore_token=None, batch_data=None):
+        if ignore_token is None:
+            ignore_token = self.ignore_token
+        final_output = to_cuda(torch.LongTensor(PaddedList(batch_data['final_output'], fill_value=ignore_token)))
+        is_copy = (model_output[2] > 0.5).float()
+        is_copy_target = model_target[2]
+        is_copy_accuracy = self.is_copy_accuracy.add_result(is_copy, is_copy_target)
+        p0 = torch.topk(F.softmax(model_output[0], dim=-1), dim=-1, k=1)[1]
+        p1 = torch.topk(F.softmax(model_output[1], dim=-1), dim=-1, k=1)[1]
+        position = torch.cat([p0, p1], dim=1)
+        position_target = torch.stack([model_target[0], model_target[1]], dim=1)
+        position_correct = self.position_correct.add_result(position, position_target)
+
+        all_output, sample_output_ids = output
+        target_output = to_cuda(torch.LongTensor(PaddedList(batch_data['target'], fill_value=ignore_token)))
+        output_accuracy = self.output_accuracy.add_result(sample_output_ids, target_output[:, 1:])
+
+        all_output, final_output = expand_tensor_sequence_to_same(all_output, final_output, fill_value=ignore_token)
+        all_correct = self.all_correct.add_result(all_output, final_output)
+        return "is_copy_accuracy evaluate:{}, position_correct evaluate:{}, output_accuracy evaluate:{}, " \
+               "all_correct evaluate: {}".format(is_copy_accuracy, position_correct, output_accuracy, all_correct)
+
+    def clear_result(self):
+        self.is_copy_accuracy.clear_result()
+        self.position_correct.clear_result()
+        self.output_accuracy.clear_result()
+        self.all_correct.clear_result()
+
+    def get_result(self):
+        return self.is_copy_accuracy.get_result(), self.position_correct.get_result(), \
+               self.output_accuracy.get_result(), self.all_correct.get_result()
+
+    def __str__(self):
+        is_copy, position, out, correct = self.get_result()
+        return "ErrorPositionAndValueAccuracy is_copy evaluate:{}, position evaluate:{}, " \
+               "output evaluate:{}, all evaluate: {}".format(is_copy, position, out, correct)
+
+    def __repr__(self):
+        return self.__str__()
+

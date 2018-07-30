@@ -282,19 +282,19 @@ def permute_last_dim_to_second(log_probs):
     return log_probs
 
 
-def expand_tensor_sequence_len(t, max_len, fill_value=0):
-    t_len = t.shape[1]
+def expand_tensor_sequence_len(t, max_len, fill_value=0, dim=1):
+    t_len = t.shape[dim]
     if max_len == t_len:
         return t
     expand_shape = list(t.shape)
-    expand_shape[1] = 1
+    expand_shape[dim] = 1
     one_t = to_cuda(torch.ones(*expand_shape).float()) * fill_value
-    expand_t = one_t.expand(-1, max_len - t_len, *[-1 for i in range(len(t.shape) - 2)])
+    expand_t = one_t.expand(*[-1 for i in range(dim)], max_len - t_len, *[-1 for i in range(len(t.shape) - 1 - dim)])
     if t.data.type() == 'torch.cuda.LongTensor' or t.data.type() == 'torch.LongTensor':
         expand_t = expand_t.long()
     elif t.data.type() == 'torch.cuda.ByteTensor' or t.data.type() == 'torch.ByteTensor':
         expand_t = expand_t.byte()
-    res_t = torch.cat([t, expand_t], dim=1)
+    res_t = torch.cat([t, expand_t], dim=dim)
     return res_t
 
 
@@ -305,6 +305,16 @@ def expand_tensor_sequence_to_same(t1, t2, fill_value=0):
     t1 = expand_tensor_sequence_len(t1, expand_len, fill_value)
     t2 = expand_tensor_sequence_len(t2, expand_len, fill_value)
     return t1, t2
+
+
+def expand_tensor_sequence_list_to_same(t_list, fill_value=0, dim=1):
+    max_len = t_list[0].shape[dim]
+    for t in t_list[1:]:
+        if t.shape[dim]>max_len:
+            max_len = t.shape[dim]
+
+    expand_t_list = [expand_tensor_sequence_len(t, max_len=max_len, fill_value=fill_value, dim=dim) for t in t_list]
+    return expand_t_list
 
 
 def expand_output_and_target_sequence_len(model_output, model_target, fill_value=0):
@@ -399,6 +409,28 @@ class MaskOutput(nn.Module):
         input_seq = input_seq.unsqueeze(1)
         o = torch.bmm(input_seq, weight).squeeze(1)
         o.data.masked_fill_(~grammar_mask, -float('inf'))
+        return o
+
+
+class SequenceMaskOutput(nn.Module):
+    def __init__(self,
+                 hidden_state_size,
+                 vocabulary_size):
+        super().__init__()
+        self.embedding = nn.Embedding(vocabulary_size, hidden_state_size)
+
+    def forward(self, input_seq, grammar_index, grammar_mask, ):
+        batch_size = input_seq.shape[0]
+        seq_len = input_seq.shape[1]
+        hidden_size = input_seq.shape[2]
+        weight = self.embedding(grammar_index).permute(0, 1, 3, 2)
+        weight_hidden_size = weight.shape[-2]
+        input_seq = input_seq.view(batch_size*seq_len, 1, hidden_size)
+        weight = weight.view(batch_size*seq_len, weight_hidden_size, -1)
+        o = torch.bmm(input_seq, weight).view(batch_size, seq_len, -1)
+        o.data.masked_fill_(~grammar_mask, -float('inf'))
+        input_seq_mask = torch.ne(torch.sum(grammar_mask, dim=-1), 0)
+        o.data.masked_fill_(~torch.unsqueeze(input_seq_mask, dim=-1), 0)
         return o
 
 

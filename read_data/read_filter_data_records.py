@@ -1,8 +1,8 @@
-from common.analyse_include_util import remove_include
+from common.analyse_include_util import remove_include, extract_include, replace_include_with_blank
 from read_data.read_data_from_db import read_train_data_effect_all_c_error_records, read_train_data_all_c_error_records, \
     read_compile_success_c_records, read_fake_common_c_error_records, read_fake_random_c_error_records, \
     read_deepfix_records, read_slk_grammar_sample_train_records, read_slk_grammar_sample_valid_records, \
-    read_slk_grammar_sample_test_records
+    read_slk_grammar_sample_test_records, read_fake_common_deepfix_error_records
 from common.util import disk_cache, compile_c_code_by_gcc_c89, group_df_to_grouped_list, init_code, \
     check_ascii_character
 from common.constants import CACHE_DATA_PATH
@@ -164,7 +164,7 @@ def read_filter_grammar_sample_valid_records():
     data_df['original_error_code'] = data_df['code']
     data_df['code'] = data_df['sample_code']
     data_df['similar_code'] = data_df['similar_code'].map(init_code)
-    # data_df['similar_code'] = data_df['similar_code'].map(remove_include).map(lambda x: x.replace('\r', ''))
+    data_df['similar_code'] = data_df['similar_code'].map(remove_include).map(lambda x: x.replace('\r', ''))
     data_df = data_df[data_df['similar_code'].map(lambda x: x != '')]
     return data_df
 
@@ -178,6 +178,22 @@ def read_filter_grammar_sample_test_records():
     data_df['similar_code'] = data_df['similar_code'].map(init_code)
     data_df['similar_code'] = data_df['similar_code'].map(remove_include).map(lambda x: x.replace('\r', ''))
     data_df = data_df[data_df['similar_code'].map(lambda x: x != '')]
+    return data_df
+
+
+@disk_cache(basename='read_fake_deepfix_common_error_records', directory=CACHE_DATA_PATH)
+def read_fake_deepfix_common_error_records():
+    data_df = read_fake_common_deepfix_error_records()
+    print('origin data size: ', len(data_df))
+    data_df = data_df[data_df['distance'].map(lambda x: 0 < x < 10)]
+    print('after filter distance length between 0 and 10: ', len(data_df))
+    data_df['similar_code'] = data_df['similar_code'].map(init_code)
+    data_df['includes'] = data_df['similar_code'].map(extract_include)
+    data_df['similar_code_with_includes'] = data_df['similar_code']
+
+    data_df['similar_code'] = data_df['similar_code'].map(replace_include_with_blank).map(lambda x: x.replace('\r', ''))
+    data_df = data_df[data_df['similar_code'].map(lambda x: x != '')]
+
     return data_df
 
 

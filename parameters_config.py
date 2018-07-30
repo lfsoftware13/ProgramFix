@@ -1,12 +1,14 @@
 from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens, \
     SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME
 from config import SLK_SAMPLE_DBPATH
-from common.evaluate_util import SLKOutputAccuracyAndCorrect, EncoderCopyAccuracyAndCorrect
+from common.evaluate_util import SLKOutputAccuracyAndCorrect, EncoderCopyAccuracyAndCorrect, \
+    ErrorPositionAndValueAccuracy
 from common.opt import OpenAIAdam
 from common.pycparser_util import tokenize_by_clex_fn
+from model.encoder_sample_model import parse_input_batch_data_fn
 from model.one_pointer_copy_self_attention_seq2seq_model_gammar_mask_refactor import load_sample_save_dataset, \
     create_save_sample_data
-from read_data.load_data_vocabulary import create_common_error_vocabulary
+from read_data.load_data_vocabulary import create_common_error_vocabulary, create_deepfix_common_error_vocabulary
 from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
 
 
@@ -36,8 +38,8 @@ def test_config1(is_debug):
     parse_target_batch_data = create_parse_target_batch_data()
     create_output_id_fn = create_output_ids
     loss_fn = create_combine_loss_fn(average_value=True)
-    # datasets = load_dataset(is_debug, vocabulary, mask_transformer=transformer)
-    datasets = load_sample_save_dataset(is_debug, vocabulary, mask_transformer=transformer)
+    datasets = load_dataset(is_debug, vocabulary, mask_transformer=transformer)
+    # datasets = load_sample_save_dataset(is_debug, vocabulary, mask_transformer=transformer)
 
     epoches=40
     train_len = len(datasets[0])
@@ -52,7 +54,7 @@ def test_config1(is_debug):
         'model_fn': RNNPointerNetworkModelWithSLKMask,
         'model_dict': {'vocabulary_size': vocabulary.vocabulary_size, 'hidden_size': 400,
                        'num_layers': 3, 'start_label': vocabulary.word_to_id(vocabulary.begin_tokens[0]),
-                       'end_label': vocabulary.word_to_id(vocabulary.end_tokens[0]), 'dropout_p': 0,
+                       'end_label': vocabulary.word_to_id(vocabulary.end_tokens[0]), 'dropout_p': 0.2,
                        'MAX_LENGTH': 500, 'atte_position_type': 'content', 'mask_transformer': transformer},
 
         'do_sample_evaluate': False,
@@ -69,7 +71,7 @@ def test_config1(is_debug):
         'ac_copy_train': False,
         'ac_copy_radio': 0.2,
 
-        'do_sample_and_save': True,
+        'do_sample_and_save': False,
         'add_data_record_fn': create_save_sample_data(vocabulary),
         'db_path': SLK_SAMPLE_DBPATH,
         'table_basename': SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME,
@@ -167,6 +169,104 @@ def encoder_copy_config1(is_debug):
         'epcohes': epoches,
         'start_epoch': 0,
         'epoch_ratio': 0.25,
+        'learning_rate': 6.25e-5,
+        'batch_size': batch_size,
+        'clip_norm': 1,
+        'optimizer': OpenAIAdam,
+        'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
+                           't_total': epoches * train_len//batch_size, 'max_grad_norm': 10},
+        'data': datasets
+    }
+
+
+def encoder_sample_config1(is_debug):
+    vocabulary = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>'])
+    begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+    end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+    inner_begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[1])
+    inner_end_id = vocabulary.word_to_id(vocabulary.end_tokens[1])
+    pad_id = vocabulary.word_to_id(vocabulary.addition_tokens[0])
+    tokenize_fn = tokenize_by_clex_fn()
+    transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
+
+    batch_size = 10
+    epoches = 80
+    ignore_id = -1
+    max_length = 500
+    do_flatten = True
+
+    from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset
+    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+                                                     mask_transformer=transformer, do_flatten=do_flatten)
+
+    # if is_debug:
+    #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
+    #     from experiment.experiment_dataset import IterateErrorDataSet
+    #     datasets = []
+    #     for t in load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten):
+    #         t = pd.DataFrame(t)
+    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length, do_flatten=do_flatten))
+    #     datasets.append(None)
+    # else:
+    #     from experiment.experiment_util import load_common_error_data_with_encoder_copy
+    #     from experiment.experiment_dataset import IterateErrorDataSet
+    #     datasets = []
+    #     for t in load_common_error_data_with_encoder_copy(inner_begin_id, inner_end_id):
+    #         t = pd.DataFrame(t)
+    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length))
+    #     datasets.append(None)
+
+    train_len = len(datasets[0])
+
+    from model.encoder_sample_model import EncoderSampleModel
+    from model.encoder_sample_model import create_parse_target_batch_data
+    from model.encoder_sample_model import create_loss_fn
+    from model.encoder_sample_model import create_output_ids_fn
+    return {
+        'name': 'encoder_sample',
+        'save_name': 'encoder_sample.pkl',
+        'load_model_name': 'encoder_sample.pkl',
+        'logger_file_path': 'encoder_sample.log',
+
+        'model_fn': EncoderSampleModel,
+        'model_dict': {"start_label": begin_id,
+                       "end_label": end_id,
+                       "vocabulary_size": vocabulary.vocabulary_size,
+                       "embedding_size": 400,
+                       "hidden_size": 400,
+                       "max_sample_length": 10,
+                       'graph_parameter': {'vocab_size': vocabulary.vocabulary_size,
+                                           'max_len': max_length, 'input_size': 400,
+                                           'input_dropout_p': 0, 'dropout_p': 0,
+                                           'n_layers': 3, 'bidirectional': True, 'rnn_cell': 'gru',
+                                           'variable_lengths': False, 'embedding': None,
+                                           'update_embedding': True},
+                       'graph_embedding': 'rnn',
+                       'pointer_type': 'query',
+                       'rnn_type': 'gru',
+                       "rnn_layer_number": 3,
+                       "max_length": max_length,
+                       'dropout_p': 0,
+                       },
+
+        'do_sample_evaluate': False,
+
+        'vocabulary': vocabulary,
+        'parse_input_batch_data_fn': parse_input_batch_data_fn,
+        'parse_target_batch_data_fn': create_parse_target_batch_data(ignore_id),
+        'expand_output_and_target_fn': None,
+        'create_output_ids_fn': create_output_ids_fn(inner_end_id),
+        'train_loss': create_loss_fn(ignore_id),
+        'evaluate_object_list': [ErrorPositionAndValueAccuracy(ignore_token=ignore_id)],
+
+        'ac_copy_train': False,
+        'ac_copy_radio': 0.2,
+
+        'epcohes': epoches,
+        'start_epoch': 0,
+        'epoch_ratio': 1,
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,
         'clip_norm': 1,

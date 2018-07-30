@@ -48,7 +48,7 @@ def train(model, dataset, batch_size, loss_function, optimizer, clip_norm, epoch
         for batch_data in data_loader(dataset, batch_size=batch_size, is_shuffle=True, drop_last=True, epoch_ratio=epoch_ratio):
             model.zero_grad()
 
-            model_input = parse_input_batch_data_fn(batch_data)
+            model_input = parse_input_batch_data_fn(batch_data, do_sample=False)
             model_output = model.forward(*model_input)
 
             model_target = parse_target_batch_data_fn(batch_data)

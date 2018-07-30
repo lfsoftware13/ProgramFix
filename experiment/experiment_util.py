@@ -5,10 +5,11 @@ from common.constants import CACHE_DATA_PATH
 from common.pycparser_util import tokenize_by_clex_fn
 from common.util import disk_cache
 from experiment.parse_xy_util import parse_error_tokens_and_action_map, parse_test_tokens, \
-    parse_output_and_position_map, parse_error_tokens_and_action_map_encoder_copy
-from read_data.load_data_vocabulary import create_common_error_vocabulary
+    parse_output_and_position_map, parse_error_tokens_and_action_map_encoder_copy, \
+    parse_iterative_sample_action_error_code
+from read_data.load_data_vocabulary import create_common_error_vocabulary, create_deepfix_common_error_vocabulary
 from read_data.read_experiment_data import read_fake_common_c_error_dataset_with_limit_length, read_deepfix_error_data, \
-    read_grammar_sample_error_data
+    read_grammar_sample_error_data, read_fake_common_deepfix_error_dataset_with_limit_length
 
 import pandas as pd
 
@@ -261,6 +262,141 @@ def load_deepfix_error_data():
     return deepfix_dict
 
 
+# @disk_cache(basename='load_fake_deepfix_dataset_iterate_error_data_sample_100', directory=CACHE_DATA_PATH)
+def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False):
+    vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>'])
+
+    train, valid, test = read_fake_common_deepfix_error_dataset_with_limit_length(500)
+
+    train = train.sample(100)
+    valid = valid.sample(100)
+    test = test.sample(100)
+
+    train = convert_c_code_fields_to_cpp_fields(train)
+    valid = convert_c_code_fields_to_cpp_fields(valid)
+    test = convert_c_code_fields_to_cpp_fields(test)
+
+    tokenize_fn = tokenize_by_clex_fn()
+    parse_fn = parse_iterative_sample_action_error_code
+    parse_param = [vocab, action_list_sorted_no_reverse, tokenize_fn]
+
+    train_data = parse_fn(train, 'train', *parse_param)
+    valid_data = parse_fn(valid, 'valid', *parse_param)
+    test_data = parse_fn(test, 'test', *parse_param)
+
+    train = train.loc[train_data[0].index.values]
+    valid = valid.loc[valid_data[0].index.values]
+    test = test.loc[test_data[0].index.values]
+
+    train_dict = {'error_token_id_list': train_data[0], 'sample_error_id_list': train_data[1],
+                  'sample_ac_id_list': train_data[2], 'ac_pos_list': train_data[3],
+                  'error_pos_list': train_data[4], 'includes': train['includes'],
+                  'distance': train['distance'], 'ac_code_ids': train_data[5],
+                  'is_copy_list': train_data[6], 'copy_pos_list': train_data[7], 'sample_mask_list': train_data[8]}
+    valid_dict = {'error_token_id_list': valid_data[0], 'sample_error_id_list': valid_data[1],
+                  'sample_ac_id_list': valid_data[2], 'ac_pos_list': valid_data[3],
+                  'error_pos_list': valid_data[4], 'includes': valid['includes'],
+                  'distance': valid['distance'], 'ac_code_ids': valid_data[5],
+                  'is_copy_list': valid_data[6], 'copy_pos_list': valid_data[7], 'sample_mask_list': valid_data[8]}
+    test_dict = {'error_token_id_list': test_data[0], 'sample_error_id_list': test_data[1],
+                  'sample_ac_id_list': test_data[2], 'ac_pos_list': test_data[3],
+                  'error_pos_list': test_data[4], 'includes': test['includes'],
+                  'distance': test['distance'], 'ac_code_ids': test_data[5],
+                 'is_copy_list': test_data[6], 'copy_pos_list': test_data[7], 'sample_mask_list': test_data[8]}
+
+    if do_flatten:
+        train_dict = flatten_iterative_data(train_dict)
+        valid_dict = flatten_iterative_data(valid_dict)
+        test_dict = flatten_iterative_data(test_dict)
+
+    return train_dict, valid_dict, test_dict
+
+
+# @disk_cache(basename='load_fake_deepfix_dataset_iterate_error_data', directory=CACHE_DATA_PATH)
+def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False):
+    vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>'])
+
+    train, valid, test = read_fake_common_deepfix_error_dataset_with_limit_length(500)
+
+    train = convert_c_code_fields_to_cpp_fields(train)
+    valid = convert_c_code_fields_to_cpp_fields(valid)
+    test = convert_c_code_fields_to_cpp_fields(test)
+
+    tokenize_fn = tokenize_by_clex_fn()
+    parse_fn = parse_iterative_sample_action_error_code
+    parse_param = [vocab, action_list_sorted_no_reverse, tokenize_fn]
+
+    train_data = parse_fn(train, 'train', *parse_param)
+    valid_data = parse_fn(valid, 'valid', *parse_param)
+    test_data = parse_fn(test, 'test', *parse_param)
+
+    train = train.loc[train_data[0].index.values]
+    valid = valid.loc[valid_data[0].index.values]
+    test = test.loc[test_data[0].index.values]
+
+    train_dict = {'error_token_id_list': train_data[0], 'sample_error_id_list': train_data[1],
+                  'sample_ac_id_list': train_data[2], 'ac_pos_list': train_data[3],
+                  'error_pos_list': train_data[4], 'includes': train['includes'],
+                  'distance': train['distance'], 'ac_code_ids': train_data[5],
+                  'is_copy_list': train_data[6], 'copy_pos_list': train_data[7], 'sample_mask_list': train_data[8]}
+    valid_dict = {'error_token_id_list': valid_data[0], 'sample_error_id_list': valid_data[1],
+                  'sample_ac_id_list': valid_data[2], 'ac_pos_list': valid_data[3],
+                  'error_pos_list': valid_data[4], 'includes': valid['includes'],
+                  'distance': valid['distance'], 'ac_code_ids': valid_data[5],
+                  'is_copy_list': valid_data[6], 'copy_pos_list': valid_data[7], 'sample_mask_list': valid_data[8]}
+    test_dict = {'error_token_id_list': test_data[0], 'sample_error_id_list': test_data[1],
+                  'sample_ac_id_list': test_data[2], 'ac_pos_list': test_data[3],
+                  'error_pos_list': test_data[4], 'includes': test['includes'],
+                  'distance': test['distance'], 'ac_code_ids': test_data[5],
+                 'is_copy_list': test_data[6], 'copy_pos_list': test_data[7], 'sample_mask_list': test_data[8]}
+
+    if do_flatten:
+        train_dict = flatten_iterative_data(train_dict)
+        valid_dict = flatten_iterative_data(valid_dict)
+        test_dict = flatten_iterative_data(test_dict)
+
+    return train_dict, valid_dict, test_dict
+
+
+def flatten_iterative_data(data_dict):
+    flatten_dict = {}
+    records = []
+    for i in range(len(data_dict['error_token_id_list'])):
+        error_token_id_list = data_dict['error_token_id_list'].iloc[i]
+        sample_error_id_list = data_dict['sample_error_id_list'].iloc[i]
+        sample_ac_id_list = data_dict['sample_ac_id_list'].iloc[i]
+        ac_pos_list = data_dict['ac_pos_list'].iloc[i]
+        error_pos_list = data_dict['error_pos_list'].iloc[i]
+        includes = data_dict['includes'].iloc[i]
+        distance = data_dict['distance'].iloc[i]
+        ac_code_ids = data_dict['ac_code_ids'].iloc[i]
+        is_copy_list = data_dict['is_copy_list'].iloc[i]
+        copy_pos_list = data_dict['copy_pos_list'].iloc[i]
+        sample_mask_list = data_dict['sample_mask_list'].iloc[i]
+        c = 0
+        for error_token_id, sample_error_id, sample_ac_id, ac_pos, error_pos, is_copy, copy_pos in \
+            zip(error_token_id_list, sample_error_id_list, sample_ac_id_list, ac_pos_list, error_pos_list,
+                is_copy_list, copy_pos_list):
+            if (c+1) < len(error_token_id_list):
+                target_ac_token_id = error_token_id_list[c+1]
+            else:
+                target_ac_token_id = ac_code_ids
+            one = (error_token_id, sample_error_id, sample_ac_id, ac_pos, error_pos, includes, distance, ac_code_ids,
+                   is_copy, copy_pos, sample_mask_list, target_ac_token_id)
+            records += [one]
+            c += 1
+
+    for key, v in zip(['error_token_id_list', 'sample_error_id_list', 'sample_ac_id_list', 'ac_pos_list',
+                       'error_pos_list', 'includes', 'distance', 'ac_code_ids', 'is_copy_list',
+                       'copy_pos_list', 'sample_mask_list', 'target_ac_token_id_list'], zip(*records)):
+        flatten_dict[key] = pd.Series(v)
+    return flatten_dict
+
+
 # ---------------------------------- addition train dataset --------------------------------------- #
 def create_addition_error_data(records):
     error_code_word_ids = [rec['error_code_word_id'] for rec in records]
@@ -336,18 +472,29 @@ def convert_deepfix_to_c_code(df):
     return df
 
 
-def action_list_sorted(action_list):
+def action_list_sorted(action_list, reverse=True):
     INSERT = 1
     def sort_key(a):
         bias = 0.5 if a['act_type'] == INSERT else 0
         return a['token_pos'] - bias
 
-    action_list = sorted(action_list, key=sort_key, reverse=True)
+    action_list = sorted(action_list, key=sort_key, reverse=reverse)
     return action_list
 
+def action_list_sorted_no_reverse(action_list):
+    return action_list_sorted(action_list, reverse=False)
+
+
 if __name__ == '__main__':
-    data_dict = load_deepfix_error_data()
-    print(data_dict['error_code_word_id'].iloc[0])
-    print(data_dict['includes'].iloc[0])
-    print(data_dict['distance'].iloc[0])
-    print(len(data_dict['error_code_word_id']))
+    # data_dict = load_deepfix_error_data()
+    # print(data_dict['error_code_word_id'].iloc[0])
+    # print(data_dict['includes'].iloc[0])
+    # print(data_dict['distance'].iloc[0])
+    # print(len(data_dict['error_code_word_id']))
+
+    train_dict, valid_dict, test_dict = load_fake_deepfix_dataset_iterate_error_data()
+    print(len(train_dict['error_token_id_list']))
+    print(len(valid_dict['error_token_id_list']))
+    print(len(test_dict['error_token_id_list']))
+
+
