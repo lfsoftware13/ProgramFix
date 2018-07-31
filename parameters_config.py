@@ -224,22 +224,25 @@ def encoder_sample_config1(is_debug):
     from model.encoder_sample_model import create_parse_target_batch_data
     from model.encoder_sample_model import create_loss_fn
     from model.encoder_sample_model import create_output_ids_fn
+    from model.encoder_sample_model import expand_output_and_target_fn
     return {
-        'name': 'encoder_sample',
-        'save_name': 'encoder_sample.pkl',
-        'load_model_name': 'encoder_sample.pkl',
-        'logger_file_path': 'encoder_sample.log',
+        'name': 'encoder_sample_dropout',
+        'save_name': 'encoder_sample_dropout.pkl',
+        'load_model_name': 'encoder_sample_dropout.pkl',
+        'logger_file_path': 'encoder_sample_dropout.log',
 
         'model_fn': EncoderSampleModel,
         'model_dict': {"start_label": begin_id,
                        "end_label": end_id,
+                       "inner_start_label": inner_begin_id,
+                       "inner_end_label": inner_end_id,
                        "vocabulary_size": vocabulary.vocabulary_size,
                        "embedding_size": 400,
                        "hidden_size": 400,
                        "max_sample_length": 10,
                        'graph_parameter': {'vocab_size': vocabulary.vocabulary_size,
                                            'max_len': max_length, 'input_size': 400,
-                                           'input_dropout_p': 0, 'dropout_p': 0,
+                                           'input_dropout_p': 0.2, 'dropout_p': 0.2,
                                            'n_layers': 3, 'bidirectional': True, 'rnn_cell': 'gru',
                                            'variable_lengths': False, 'embedding': None,
                                            'update_embedding': True},
@@ -248,7 +251,10 @@ def encoder_sample_config1(is_debug):
                        'rnn_type': 'gru',
                        "rnn_layer_number": 3,
                        "max_length": max_length,
-                       'dropout_p': 0,
+                       'dropout_p': 0.2,
+                       'pad_label': pad_id,
+                       'vocabulary': vocabulary,
+                       'mask_type': 'static'
                        },
 
         'do_sample_evaluate': False,
@@ -256,7 +262,7 @@ def encoder_sample_config1(is_debug):
         'vocabulary': vocabulary,
         'parse_input_batch_data_fn': parse_input_batch_data_fn,
         'parse_target_batch_data_fn': create_parse_target_batch_data(ignore_id),
-        'expand_output_and_target_fn': None,
+        'expand_output_and_target_fn': expand_output_and_target_fn(ignore_id),
         'create_output_ids_fn': create_output_ids_fn(inner_end_id),
         'train_loss': create_loss_fn(ignore_id),
         'evaluate_object_list': [ErrorPositionAndValueAccuracy(ignore_token=ignore_id)],
@@ -266,7 +272,7 @@ def encoder_sample_config1(is_debug):
 
         'epcohes': epoches,
         'start_epoch': 0,
-        'epoch_ratio': 1,
+        'epoch_ratio': 0.35,
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,
         'clip_norm': 1,

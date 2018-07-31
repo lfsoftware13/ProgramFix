@@ -13,8 +13,9 @@ from common.graph_embedding import GGNNLayer, MultiIterationGraph
 from common import torch_util, util
 from common.problem_util import to_cuda
 from common.torch_util import create_sequence_length_mask, Update, MaskOutput, expand_tensor_sequence_list_to_same, \
-    SequenceMaskOutput
-from common.util import PaddedList
+    SequenceMaskOutput, expand_tensor_sequence_len, expand_tensor_sequence_to_same, DynamicDecoder, \
+    pad_last_dim_of_tensor_list
+from common.util import PaddedList, create_effect_keyword_ids_set
 from seq2seq.models import EncoderRNN, DecoderRNN
 
 """
@@ -198,6 +199,8 @@ class EncoderSampleModel(nn.Module):
     def __init__(self,
                  start_label,
                  end_label,
+                 inner_start_label,
+                 inner_end_label,
                  vocabulary_size,
                  embedding_size=300,
                  hidden_size=300,
@@ -209,6 +212,9 @@ class EncoderSampleModel(nn.Module):
                  rnn_layer_number=3,
                  max_length=500,
                  dropout_p=0.1,
+                 pad_label=-1,
+                 vocabulary=None,
+                 mask_type='static'
                  ):
         """
         :param vocabulary_size: The size of token vocabulary
@@ -223,6 +229,9 @@ class EncoderSampleModel(nn.Module):
         """
         super().__init__()
         self.max_sample_length = max_sample_length
+        self.inner_start_label = inner_start_label
+        self.inner_end_label = inner_end_label
+        self.pad_label = pad_label
         self.embedding = nn.Embedding(vocabulary_size, embedding_size)
         self.graph_encoder = GraphEncoder(hidden_size=hidden_size, graph_embedding=graph_embedding,
                                           pointer_type=pointer_type, graph_parameter=graph_parameter,
@@ -231,13 +240,19 @@ class EncoderSampleModel(nn.Module):
                                           dropout_p=dropout_p)
         # self.slice_encoder = SliceEncoder(rnn_type=rnn_type, hidden_size=hidden_size, n_layer=rnn_layer_number,
         #                                   dropout_p=dropout_p)
-        self.decoder = DecoderRNN(vocab_size=vocabulary_size, max_len=max_length, hidden_size=hidden_size,
-                                  sos_id=start_label, eos_id=end_label, n_layers=rnn_layer_number, rnn_cell=rnn_type,
+        self.decoder = DecoderRNN(vocab_size=vocabulary_size, max_len=max_sample_length, hidden_size=hidden_size,
+                                  sos_id=inner_start_label, eos_id=inner_end_label, n_layers=rnn_layer_number, rnn_cell=rnn_type,
                                   bidirectional=False, input_dropout_p=dropout_p, dropout_p=dropout_p,
                                   use_attention=True)
         self.output = Output(hidden_size, vocabulary_size)
         self.layer_number = rnn_layer_number
         self.hidden_size = hidden_size
+
+        self.dynamic_decoder = DynamicDecoder(self.inner_start_label, self.inner_end_label, self.pad_label,
+                                              self.decoder_one_step, self.create_next_output_input, self.max_sample_length)
+        self.vocabulary = vocabulary
+        self.keyword_ids_set = create_effect_keyword_ids_set(vocabulary)
+        self.mask_type = mask_type
 
     def _train_forward(self,
                        adjacent_matrix,
@@ -260,6 +275,7 @@ class EncoderSampleModel(nn.Module):
             .permute(1, 0, 2)\
             .contiguous()
         encoder_mask = create_sequence_length_mask(input_length, )
+        # do decoder and calculate output
         decoder_output, _, _ = self.decoder(inputs=self.embedding(target), encoder_hidden=slice_state,
                                             encoder_outputs=input_seq, encoder_mask=~encoder_mask,
                                             teacher_forcing_ratio=1)
@@ -268,28 +284,98 @@ class EncoderSampleModel(nn.Module):
         is_copy, copy_output, sample_output = self.output(decoder_output, input_seq, copy_mask, compatible_tokens,
                                                           compatible_tokens_length, is_sample=False,
                                                           copy_target=is_copy_target)
-        return p1_o, p2_o, is_copy, copy_output, sample_output
+        return p1_o, p2_o, is_copy, copy_output, sample_output, compatible_tokens
 
     def _sample_forward(self,
                         adjacent_matrix,
-                        input_seq,
+                        ori_input_seq,
                         input_length,
                         copy_length,
                         ):
-        pass
+        batch_size = ori_input_seq.shape[0]
+        p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, ori_input_seq, copy_length)
+        p1 = torch.squeeze(torch.topk(F.log_softmax(p1_o, dim=-1), k=1, dim=-1)[1], dim=-1)
+        p2 = torch.squeeze(torch.topk(F.log_softmax(p2_o, dim=-1), k=1, dim=-1)[1], dim=-1)
+        slice_state = self.slice_encoder(p1, p2, input_seq) \
+            .permute(1, 0, 2) \
+            .contiguous() \
+            .view(batch_size, self.layer_number, -1) \
+            .permute(1, 0, 2) \
+            .contiguous()
+        encoder_mask = create_sequence_length_mask(input_length, )
+
+        decoder_output_list, _, _ = self.dynamic_decoder.decoder(encoder_output=input_seq, endocer_hidden=slice_state, encoder_mask=encoder_mask,
+                                     copy_length=copy_length, ori_input_seq=ori_input_seq, input_length=input_length)
+        is_copy_list, copy_output_list, sample_output_list, compatible_tokens_list = list(zip(*decoder_output_list))
+
+        is_copy = torch.cat(is_copy_list, dim=1)
+        copy_output = torch.cat(copy_output_list, dim=1)
+        padded_sample_output_list = pad_last_dim_of_tensor_list(sample_output_list, fill_value=-float('inf'))
+        sample_output = torch.cat(padded_sample_output_list, dim=1)
+        padded_compatible_tokens_list = pad_last_dim_of_tensor_list(compatible_tokens_list, fill_value=0)
+        pad_compatible_tokens = torch.cat(padded_compatible_tokens_list, dim=1)
+        return p1_o, p2_o, is_copy, copy_output, sample_output, pad_compatible_tokens
+
+    def create_one_step_token_masks(self, ori_input_seq, input_length, continue_mask):
+        if self.mask_type == 'static':
+            if not hasattr(self, 'compatible_tokens'):
+                self.compatible_tokens, self.compatible_tokens_length = self.create_static_token_mask(ori_input_seq, input_length)
+            return self.compatible_tokens, self.compatible_tokens_length
+        return None, None
+
+    def create_static_token_mask(self, ori_input_seq, input_length):
+        ori_input_seq_list = ori_input_seq.tolist()
+        input_length_list = input_length.tolist()
+        mask_list = []
+        for inp, l in zip(ori_input_seq_list, input_length_list):
+            input_set = self.keyword_ids_set | set(inp[1:l-1]) | {self.inner_end_label}
+            mask_list += [[sorted(input_set)]]
+        mask_len_list = [[len(j) for j in i] for i in mask_list]
+        compatible_tokens = torch.LongTensor(PaddedList(mask_list)).to(ori_input_seq.device)
+        compatible_tokens_length = torch.LongTensor(PaddedList(mask_len_list)).to(ori_input_seq.device)
+        return compatible_tokens, compatible_tokens_length
+
+    def decoder_one_step(self, decoder_inputs, continue_mask, start_index, hidden, encoder_output, encoder_mask, copy_length,
+                         ori_input_seq=None, input_length=None):
+        decoder_output, hidden, _ = self.decoder(inputs=self.embedding(decoder_inputs), encoder_hidden=hidden,
+                                            encoder_outputs=encoder_output, encoder_mask=~encoder_mask,
+                                            teacher_forcing_ratio=0)
+        decoder_output = torch.stack(decoder_output, dim=1)
+        copy_mask = create_sequence_length_mask(copy_length)
+
+        compatible_tokens, compatible_tokens_length = \
+            self.create_one_step_token_masks(ori_input_seq=ori_input_seq, input_length=input_length, continue_mask=continue_mask)
+
+        is_copy, copy_output, sample_output = self.output(decoder_output, encoder_output, copy_mask, compatible_tokens,
+                                                          compatible_tokens_length, is_sample=True,
+                                                          copy_target=None)
+        error_list = []
+        return (is_copy, copy_output, sample_output, compatible_tokens), hidden, error_list
+
+    def create_next_output_input(self, one_step_decoder_output, ori_input_seq=None, **kwargs):
+        is_copy, copy_output, sample_output, compatible_tokens = one_step_decoder_output
+        is_copy = is_copy > 0.5
+        copy_output_id = torch.squeeze(torch.topk(F.log_softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
+        sample_output_id = torch.topk(F.log_softmax(sample_output, dim=-1), dim=-1, k=1)[1]
+        sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
+
+        input_seq = ori_input_seq
+        copy_ids = torch.gather(input_seq, index=copy_output_id, dim=-1)
+        sample_output_ids = torch.where(is_copy, copy_ids, sample_output)
+        return sample_output_ids
 
     def forward(self,
                 adjacent_matrix,
                 input_seq,
                 input_length,
                 copy_length,
-                do_sample,
                 p1_target=None,
                 p2_target=None,
                 target=None,
                 is_copy_target=None,
                 compatible_tokens=None,
                 compatible_tokens_length=None,
+                do_sample=False
                 ):
         if do_sample:
             return self._sample_forward(adjacent_matrix,
@@ -312,7 +398,7 @@ def create_loss_fn(ignore_id):
     bce_loss = nn.BCEWithLogitsLoss(reduce=False)
     cross_loss = nn.CrossEntropyLoss(ignore_index=ignore_id)
 
-    def loss_fn(p1_o, p2_o, is_copy, copy_output, sample_output,
+    def loss_fn(p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens,
                 p1_target, p2_target, is_copy_target, copy_target, sample_target, sample_small_target):
         try:
             is_copy_loss = torch.mean(bce_loss(is_copy, is_copy_target) * torch.ne(is_copy_target, ignore_id).float())
@@ -358,27 +444,29 @@ def parse_input_batch_data_fn(batch_data, do_sample):
         max_mask_len = max(max(batch_data['compatible_tokens_length']))
         compatible_tokens = to_long(PaddedList(batch_data['compatible_tokens'], shape=[batch_size, seq_len, max_mask_len]))
         compatible_tokens_length = to_long(PaddedList(batch_data['compatible_tokens_length']))
-        return adjacent_matrix, input_seq, input_length, copy_length, do_sample, p1_target, p2_target, target, \
+        return adjacent_matrix, input_seq, input_length, copy_length, p1_target, p2_target, target, \
                is_copy_target, \
                compatible_tokens, \
                compatible_tokens_length
     else:
-        return adjacent_matrix, input_seq, input_length, copy_length, do_sample
+        return adjacent_matrix, input_seq, input_length, copy_length
 
 
 def create_output_ids_fn(end_id):
     def create_output_ids(model_output, model_input, do_sample=False):
-        p1_o, p2_o, is_copy, copy_output, sample_output = model_output
+        p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens = model_output
+        if do_sample:
+            compatible_tokens = output_compatible_tokens
+        else:
+            compatible_tokens = model_input[8]
         p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
         p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
         is_copy = torch.squeeze(is_copy, dim=-1) > 0.5
         copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
         sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
-        compatible_tokens= model_input[9]
         sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
 
-        adjacent_matrix, input_seq, input_length, copy_length, do_sample, p1_target, p2_target, target, is_copy_target, \
-        compatible_tokens, compatible_tokens_length = model_input
+        input_seq = model_input[1]
         copy_ids = torch.gather(input_seq, index=copy_output_id, dim=-1)
         sample_output_ids = torch.where(is_copy, copy_ids, sample_output)
 
@@ -403,3 +491,23 @@ def create_output_ids_fn(end_id):
         outputs = torch.stack(final_output, dim=0)
         return outputs, sample_output_ids
     return create_output_ids
+
+
+def expand_output_and_target_fn(ignore_token):
+    def expand_output_and_target(model_output, model_target):
+        model_output = list(model_output)
+        model_target = list(model_target)
+        # p1_o, p2_o, is_copy, copy_output, sample_output = model_output
+        # p1, p2, is_copy, copy_target, sample_target, sample_small_target = model_target
+        model_output[2], model_target[2] = expand_tensor_sequence_to_same(model_output[2], model_target[2],
+                                                                          fill_value=0)
+        model_output[3], model_target[3] = expand_tensor_sequence_to_same(model_output[3], model_target[3],
+                                                                          fill_value=ignore_token)
+        model_output[4], model_target[4] = expand_tensor_sequence_to_same(model_output[4], model_target[4],
+                                                                          fill_value=ignore_token)
+        max_expand_len = model_output[4].shape[1]
+        model_target[5] = expand_tensor_sequence_len(model_target[5], max_expand_len, fill_value=ignore_token)
+        model_output[5] = expand_tensor_sequence_len(model_output[5], max_expand_len)
+        return model_output, model_target
+    return expand_output_and_target
+

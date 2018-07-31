@@ -1056,3 +1056,12 @@ if __name__ == '__main__':
     print(2 in o)
     print(4 in o)
     print(o)
+
+
+def create_effect_keyword_ids_set(keyword_vocab):
+    from common.constants import pre_defined_c_label, pre_defined_c_library_tokens
+    keyword = pre_defined_c_label | pre_defined_c_library_tokens
+    effect_vocabulary_word = keyword_vocab.word_to_id_dict.keys()
+    keyword_ids = [keyword_vocab.word_to_id(key) if key in effect_vocabulary_word else None for key in keyword]
+    keyword_ids = set(filter(lambda x: x is not None, keyword_ids))
+    return keyword_ids
