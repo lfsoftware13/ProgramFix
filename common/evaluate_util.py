@@ -454,13 +454,13 @@ class SequenceBinaryClassExactMatch(Evaluator):
 
 class TokenAccuracy(Evaluator):
     def __init__(self, ignore_token=None):
-        self.total_count = 0
-        self.match_count = 0
+        self.total_count = 0.0
+        self.match_count = 0.0
         self.ignore_token = ignore_token
 
     def clear_result(self):
-        self.total_count = 0
-        self.match_count = 0
+        self.total_count = 0.0
+        self.match_count = 0.0
 
     def add_result(self, output, target, ignore_token=None, batch_data=None):
         ignore_token = ignore_token if ignore_token is not None else self.ignore_token
@@ -485,19 +485,19 @@ class TokenAccuracy(Evaluator):
 
 class SequenceCorrect(Evaluator):
     def __init__(self, ignore_token=None):
-        self.total_batch = 0
-        self.match_batch = 0
+        self.total_batch = 0.0
+        self.match_batch = 0.0
         self.ignore_token = ignore_token
 
     def clear_result(self):
-        self.total_batch = 0
-        self.match_batch = 0
+        self.total_batch = 0.0
+        self.match_batch = 0.0
 
     def add_result(self, output, target, ignore_token=None, batch_data=None):
         ignore_token = ignore_token if ignore_token is not None else self.ignore_token
         output_mask = torch.ne(target, ignore_token)
         not_equal_batch = torch.sum(torch.ne(output, target) & output_mask, dim=-1).float()
-        match = torch.sum(torch.eq(not_equal_batch, 0))
+        match = torch.sum(torch.eq(not_equal_batch, 0)).float()
         batch_size = output.shape[0]
         self.total_batch += batch_size
         self.match_batch += match.item()
@@ -616,7 +616,6 @@ class ErrorPositionAndValueAccuracy(Evaluator):
     def add_result(self, output, model_output, model_target, model_input, ignore_token=None, batch_data=None):
         if ignore_token is None:
             ignore_token = self.ignore_token
-        final_output = to_cuda(torch.LongTensor(PaddedList(batch_data['final_output'], fill_value=ignore_token)))
         is_copy = (model_output[2] > 0.5).float()
         is_copy_target = model_target[2]
         is_copy_accuracy = self.is_copy_accuracy.add_result(is_copy, is_copy_target)
@@ -628,10 +627,13 @@ class ErrorPositionAndValueAccuracy(Evaluator):
 
         all_output, sample_output_ids = output
         target_output = to_cuda(torch.LongTensor(PaddedList(batch_data['target'], fill_value=ignore_token)))
-        output_accuracy = self.output_accuracy.add_result(sample_output_ids, target_output[:, 1:])
+        sample_output_ids, target_output = expand_tensor_sequence_to_same(sample_output_ids, target_output[:, 1:])
+        output_accuracy = self.output_accuracy.add_result(sample_output_ids, target_output)
 
-        all_output, final_output = expand_tensor_sequence_to_same(all_output, final_output, fill_value=ignore_token)
-        all_correct = self.all_correct.add_result(all_output, final_output)
+        full_output_target = to_cuda(
+            torch.LongTensor(PaddedList(batch_data['full_output_target'], fill_value=ignore_token)))
+        all_output, full_output_target = expand_tensor_sequence_to_same(all_output, full_output_target, fill_value=ignore_token)
+        all_correct = self.all_correct.add_result(all_output, full_output_target)
         return "is_copy_accuracy evaluate:{}, position_correct evaluate:{}, output_accuracy evaluate:{}, " \
                "all_correct evaluate: {}".format(is_copy_accuracy, position_correct, output_accuracy, all_correct)
 

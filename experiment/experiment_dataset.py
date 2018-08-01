@@ -109,46 +109,48 @@ class IterateErrorDataSet(CustomerDataSet):
             sample['input_length'] = len(sample['input_seq'])
 
         if self.set_type != 'valid' and self.set_type != 'test' and self.set_type != 'deepfix':
-            begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[1])
-            end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[1])
-            # sample['sample_inputs'] = [[begin_id]+one for one in row['sample_ac_id_list']]
+            inner_begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[1])
+            inner_end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[1])
+            # sample['sample_inputs'] = [[inner_begin_id]+one for one in row['sample_ac_id_list']]
             # sample['sample_inputs_length'] = [len(ids) for ids in sample['sample_inputs']]
             if not self.is_flatten:
                 sample['is_copy_target'] = [one + [0] for one in row['is_copy_list']]
                 sample['copy_target'] = [one + [-1] for one in row['copy_pos_list']]
                 # sample['copy_length'] = [len(one) for one in sample['is_copy_target']]
 
-                # sample['sample_target'] = [one + [end_id] for one in row['sample_ac_id_list']]
+                # sample['sample_target'] = [one + [inner_end_id] for one in row['sample_ac_id_list']]
                 sample['sample_outputs_length'] = [len(ids) for ids in sample['sample_target']]
-                sample['target'] = [one + [end_id] for one in row['sample_ac_id_list']]
+                sample['target'] = [one + [inner_end_id] for one in row['sample_ac_id_list']]
 
                 error_start_pos_list, error_end_pos_list = list(*row['error_pos_list'])
                 sample['p1_target'] = error_start_pos_list
                 sample['p2_target'] = error_end_pos_list
                 sample['error_pos_list'] = row['error_pos_list']
 
-                sample['compatible_tokens'] = [row['sample_mask_list'] + [end_id]
+                sample['compatible_tokens'] = [row['sample_mask_list'] + [inner_end_id]
                                               for i in range(len(sample['sample_target']))]
                 sample['compatible_tokens_length'] = [len(one) for one in sample['compatible_tokens']]
 
                 sample['distance'] = row['distance']
                 sample['adj'] = 0
             else:
-                sample['target'] = [begin_id] + row['sample_ac_id_list'] + [end_id]
+                sample['target'] = [inner_begin_id] + row['sample_ac_id_list'] + [inner_end_id]
 
                 sample['is_copy_target'] = row['is_copy_list'] + [0]
                 sample['copy_target'] = row['copy_pos_list'] + [-1]
                 sample['copy_length'] = sample['input_length']
 
-                sample_mask = sorted(row['sample_mask_list'] + [end_id])
+                sample_mask = sorted(row['sample_mask_list'] + [inner_end_id])
                 sample_mask_dict = {v: i for i, v in enumerate(sample_mask)}
                 sample['compatible_tokens'] = [sample_mask for i in range(len(sample['is_copy_target']))]
                 sample['compatible_tokens_length'] = [len(one) for one in sample['compatible_tokens']]
 
-                sample['sample_target'] = row['sample_ac_id_list'] + [end_id]
+                sample['sample_target'] = row['sample_ac_id_list'] + [inner_end_id]
                 sample['sample_target'] = [t if c == 0 else -1 for c, t in zip(sample['is_copy_target'], sample['sample_target'])]
                 sample['sample_small_target'] = [sample_mask_dict[t] if c == 0 else -1 for c, t in zip(sample['is_copy_target'], sample['sample_target'])]
                 sample['sample_outputs_length'] = len(sample['sample_target'])
+
+                sample['full_output_target'] = row['target_ac_token_id_list'][1:-1]
 
                 sample['final_output'] = row['ac_code_ids']
                 sample['p1_target'] = row['error_pos_list'][0]

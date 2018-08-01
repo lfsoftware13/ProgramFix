@@ -2,15 +2,8 @@ import json
 import random
 import torch
 
-import numpy as np
-import more_itertools
-
 from c_parser.pycparser.pycparser.ply.lex import LexToken
-from common.analyse_include_util import extract_include, replace_include_with_blank
-from common.constants import pre_defined_c_label, pre_defined_c_library_tokens
-from common.util import PaddedList
-from torch.nn import functional as F
-
+from common.util import create_effect_keyword_ids_set
 
 # ------------------------- produce part token by part position list using tokens tensor --------------------------- #
 from experiment.generate_error.generate_error_actions import generate_actions_from_ac_to_error_by_code
@@ -387,14 +380,6 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
     return df['token_id_list'], df['sample_error_id_list'], df['sample_ac_id_list'], df['ac_pos_list'], \
            df['error_pos_list'], df['ac_code_id_with_labels'], df['is_copy_list'], df['copy_pos_list'], \
            df['sample_mask_list']
-
-
-def create_effect_keyword_ids_set(keyword_vocab):
-    keyword = pre_defined_c_label | pre_defined_c_library_tokens
-    effect_vocabulary_word = keyword_vocab.word_to_id_dict.keys()
-    keyword_ids = [keyword_vocab.word_to_id(key) if key in effect_vocabulary_word else None for key in keyword]
-    keyword_ids = set(filter(lambda x: x is not None, keyword_ids))
-    return keyword_ids
 
 
 def create_sample_is_copy(one, keyword_ids):
