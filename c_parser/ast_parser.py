@@ -1,0 +1,132 @@
+from c_parser.buffered_clex import BufferedCLex
+from c_parser.pycparser.pycparser import CParser
+from c_parser.pycparser.pycparser.c_ast import Node, FileAST
+
+from collections import namedtuple
+import re
+
+
+class AsrException(Exception):
+    def __init__(self, p, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.p = p
+
+
+class AstParser(CParser):
+    def p_error(self, p):
+        raise AsrException([t.value for t in self.cparser.symstack[1:]])
+
+
+def ast_parse(code):
+    c_parser = AstParser()
+    c_parser.build(lexer=BufferedCLex)
+    try:
+        ast = c_parser.parse(code)
+        ast = [ast]
+    except AsrException as e:
+        ast = e.p
+    return ast, [t[0] for t in c_parser.clex.tokens_buffer]
+
+
+Coordinate = namedtuple("Coordinate", ["x", "y"])
+
+
+class CodeGraph(object):
+    def __init__(self, tokens, ast_list):
+        self._tokens = tokens
+        self._max_id = len(tokens)
+        self._code_legth = len(tokens)
+        self._pos_to_id_dict = self._generate_position_to_id(tokens)
+        self._ast_list = ast_list
+        self._graph_ = [t.value for t in tokens]
+        self._link_tuple_list = [] # a tuple list (id1, id2, link_name)
+        self._name_pattern = re.compile(r'(.+)\[\d+\]')
+        self._parse_ast_list(ast_list)
+
+    def _parse_ast_list(self, ast_list):
+        for t in ast_list:
+            if isinstance(t, list):
+                self._parse_ast_list(t)
+            elif isinstance(t, dict):
+                self._parse_ast_list(t.values())
+            elif isinstance(t, FileAST):
+                for _, n in t.children():
+                    self._parse_ast(n, self._new_node(n))
+            elif isinstance(t, Node):
+                self._parse_ast(t, self._new_node(t))
+
+    @property
+    def code_length(self):
+        return self._code_legth
+
+    @property
+    def graph_length(self):
+        return self._max_id
+
+    def _generate_position_to_id(self, tokens):
+        res = {}
+        for i, token in enumerate(tokens):
+            res[Coordinate(x=token.lineno, y=token.lexpos)] = i
+        return res
+
+    def _get_token_id_by_position(self, coord):
+        key = Coordinate(coord.line, coord.column)
+        if key in self._pos_to_id_dict:
+            return self._pos_to_id_dict[key]
+        else:
+            return None
+
+    def _new_node(self, node):
+        res = self._max_id
+        node_name = type(node).__name__
+        self._graph_.append(node_name)
+        self._max_id += 1
+        return res
+
+    def _add_link(self, a, b, link_type="node_map"):
+        if a is not None and b is not None:
+            self._link_tuple_list.append((a, b, link_type))
+
+    def _parse_name(self, name):
+        m = self._name_pattern.match(name)
+        if m is not None:
+            return m.group(1)
+        return name
+
+    def _parse_ast(self, ast_node, node_id):
+        token_id = self._get_token_id_by_position(ast_node.coord)
+        self._add_link(node_id, token_id)
+        for child_name, child_node in ast_node.children():
+            child_name = self._parse_name(child_name)
+            n_id = self._new_node(child_node)
+            self._add_link(node_id, n_id, child_name)
+            self._parse_ast(child_node, n_id)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        res = "The graph nodes:{}\n".format(" ".join(self._graph_))
+        res += "\n".join(["{}:{}->{}:{} type:{}".format(link[0], self._graph_[link[0]], link[1], self._graph_[link[1]],
+                                                       link[2]) for link in self._link_tuple_list])
+        return res
+
+
+if __name__ == '__main__':
+    code1 = """
+    int add(int a,int b)
+        return a+b;
+    }
+    """
+    ast, tokens = ast_parse(code1)
+    print(ast)
+    print(CodeGraph(tokens, ast))
+    code2 = """
+    int add(int a,int b){
+        return a+b;
+    }
+    """
+    ast, tokens = ast_parse(code2)
+    print(ast)
+    print(CodeGraph(tokens, ast))
+
