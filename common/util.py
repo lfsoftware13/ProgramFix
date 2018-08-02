@@ -1051,6 +1051,25 @@ def get_position(l, t):
     return -1
 
 
+def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path=''):
+    cur_continue = []
+    cur_result_list = []
+    for code_id, con, includes, res in zip(final_output, continue_list, includes_list, result_list):
+        if not con:
+            cur_continue += [False]
+            cur_result_list += [res]
+            continue
+        code_list = [vocabulary.id_to_word(c) for c in code_id]
+        code = ' '.join(code_list)
+        for inc in includes:
+            code = inc + '\n' + code
+        res = compile_c_code_by_gcc(code, file_path=file_path)
+        cur_result_list += [res]
+        c = not res
+        cur_continue += [c]
+    return cur_continue, cur_result_list
+
+
 if __name__ == '__main__':
     o = OrderedList({3, 1, 2})
     print(2 in o)

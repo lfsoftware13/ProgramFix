@@ -655,3 +655,35 @@ class ErrorPositionAndValueAccuracy(Evaluator):
     def __repr__(self):
         return self.__str__()
 
+
+class CompileResultEvaluate(Evaluator):
+    """
+    statistics compile result. It is a special evaluator. Do not use it in evaluator_list directly.
+    """
+    def __init__(self):
+        self.total_batch = 0.0
+        self.match_batch = 0.0
+
+    def clear_result(self):
+        self.total_batch = 0.0
+        self.match_batch = 0.0
+
+    def add_result(self, result_list):
+        match = sum(result_list)
+        batch_size = len(result_list)
+        self.match_batch += match
+        self.total_batch += batch_size
+        return 'step compile result: {}'.format(match/batch_size)
+
+    def get_result(self):
+        if self.total_batch == 0:
+            return 0
+        return self.match_batch / self.total_batch
+
+    def __str__(self):
+        return ' CompileResultEvaluate: ' + str(self.get_result())
+
+    def __repr__(self):
+        return self.__str__()
+
+

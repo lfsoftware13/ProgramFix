@@ -274,9 +274,9 @@ def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False):
     valid = valid.sample(100)
     test = test.sample(100)
 
-    train = convert_c_code_fields_to_cpp_fields(train)
-    valid = convert_c_code_fields_to_cpp_fields(valid)
-    test = convert_c_code_fields_to_cpp_fields(test)
+    train = convert_c_code_fields_to_cpp_fields(train, convert_include=False)
+    valid = convert_c_code_fields_to_cpp_fields(valid, convert_include=False)
+    test = convert_c_code_fields_to_cpp_fields(test, convert_include=False)
 
     tokenize_fn = tokenize_by_clex_fn()
     parse_fn = parse_iterative_sample_action_error_code
@@ -322,9 +322,9 @@ def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False):
 
     train, valid, test = read_fake_common_deepfix_error_dataset_with_limit_length(500)
 
-    train = convert_c_code_fields_to_cpp_fields(train)
-    valid = convert_c_code_fields_to_cpp_fields(valid)
-    test = convert_c_code_fields_to_cpp_fields(test)
+    train = convert_c_code_fields_to_cpp_fields(train, convert_include=False)
+    valid = convert_c_code_fields_to_cpp_fields(valid, convert_include=False)
+    test = convert_c_code_fields_to_cpp_fields(test, convert_include=False)
 
     tokenize_fn = tokenize_by_clex_fn()
     parse_fn = parse_iterative_sample_action_error_code
@@ -360,6 +360,24 @@ def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False):
         test_dict = flatten_iterative_data(test_dict)
 
     return train_dict, valid_dict, test_dict
+
+
+# @disk_cache(basename='load_deepfix_error_data_for_iterate', directory=CACHE_DATA_PATH)
+def load_deepfix_error_data_for_iterate():
+    vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>'])
+    df = read_deepfix_error_data()
+    df = convert_deepfix_to_c_code(df)
+
+    tokenize_fn = tokenize_by_clex_fn()
+    parse_test_param = [vocab, tokenize_fn, True]
+    df_data = parse_test_tokens(df, 'deepfix', *parse_test_param)
+
+    df = df.loc[df_data.index.values]
+
+    deepfix_dict = {'error_token_id_list': df_data, 'includes': df['includes'], 'distance': df['errorcount']}
+    return deepfix_dict
 
 
 def flatten_iterative_data(data_dict):

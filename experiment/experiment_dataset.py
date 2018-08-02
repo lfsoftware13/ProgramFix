@@ -3,7 +3,7 @@ import random
 from common.pycparser_util import tokenize_by_clex_fn
 from common.util import CustomerDataSet, show_process_map
 from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data_sample_100, \
-    load_fake_deepfix_dataset_iterate_error_data
+    load_fake_deepfix_dataset_iterate_error_data, load_deepfix_error_data_for_iterate
 from read_data.load_data_vocabulary import create_deepfix_common_error_vocabulary
 from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
 from vocabulary.word_vocabulary import Vocabulary
@@ -108,9 +108,10 @@ class IterateErrorDataSet(CustomerDataSet):
         else:
             sample['input_length'] = len(sample['input_seq'])
 
+        inner_begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[1])
+        inner_end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[1])
         if self.set_type != 'valid' and self.set_type != 'test' and self.set_type != 'deepfix':
-            inner_begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[1])
-            inner_end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[1])
+
             # sample['sample_inputs'] = [[inner_begin_id]+one for one in row['sample_ac_id_list']]
             # sample['sample_inputs_length'] = [len(ids) for ids in sample['sample_inputs']]
             if not self.is_flatten:
@@ -158,7 +159,11 @@ class IterateErrorDataSet(CustomerDataSet):
                 sample['error_pos_list'] = row['error_pos_list']
 
                 sample['distance'] = row['distance']
+                sample['includes'] = row['includes']
                 sample['adj'] = 0
+        else:
+            sample['copy_length'] = sample['input_length']
+            sample['adj'] = 0
         return sample
 
     def add_samples(self, df):
@@ -213,6 +218,14 @@ def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer
     #                                     transformer_vocab_slk=mask_transformer, no_filter=True)
     return train_dataset, valid_dataset, test_dataset, None
 
+
+def load_deeffix_error_iterative_dataset_real_test(vocabulary, mask_transformer, do_flatten=False):
+    data_dict = load_deepfix_error_data_for_iterate()
+    test_dataset = IterateErrorDataSet(pd.DataFrame(data_dict), vocabulary, 'deepfix',
+                                   transformer_vocab_slk=mask_transformer, do_flatten=do_flatten)
+    info_output = "There are {} parsed data in the deepfix dataset".format(len(test_dataset))
+    print(info_output)
+    return None, None, test_dataset, None
 
 if __name__ == '__main__':
     vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
