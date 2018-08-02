@@ -5,9 +5,10 @@ from torch import nn, optim
 from tqdm import tqdm
 
 from common import torch_util, problem_util, util
+from common.evaluate_util import CompileResultEvaluate
 from common.logger import init_a_file_logger, info
 from common.problem_util import to_cuda
-from common.util import data_loader
+from common.util import data_loader, compile_code_ids_list
 import torch.functional as F
 
 from database.database_util import create_table, insert_items
@@ -27,7 +28,8 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        torch_util.load_model(m, path)
+        torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
+        # torch_util.load_model(m, path)
         print("load previous model")
     else:
         print("create new model")
@@ -168,6 +170,73 @@ def evaluate(model, dataset, batch_size, loss_function, parse_input_batch_data_f
     return evaluate_obj_list, (total_loss / steps).item()
 
 
+def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, parse_target_batch_data_fn,
+             do_sample=False, print_output=False, create_output_ids_fn=None, evaluate_obj_list=[],
+             expand_output_and_target_fn=None, max_step_times=0, vocabulary=None, file_path='',
+                        create_multi_step_next_input_batch_fn=None, extract_includes_fn=lambda x: x['includes'],
+                        print_output_fn=None):
+    total_loss = to_cuda(torch.Tensor([0]))
+    total_batch = to_cuda(torch.Tensor([0]))
+    steps = 0
+    compile_evaluator = CompileResultEvaluate()
+    compile_evaluator.clear_result()
+    for o in evaluate_object_list:
+        o.clear_result()
+
+    model.eval()
+
+    with tqdm(total=len(dataset)) as pbar:
+        with torch.no_grad():
+            for batch_data in data_loader(dataset, batch_size=batch_size, drop_last=True):
+                model.zero_grad()
+
+                input_data = batch_data.copy()
+                final_output_list = []
+                output_records_list = []
+                continue_list = [True for i in range(batch_size)]
+                result_list = [False for i in range(batch_size)]
+                result_records_list = []
+
+                for i in range(max_step_times):
+                    model_input = parse_input_batch_data_fn(input_data, do_sample=True)
+
+                    model_output = model.forward(*model_input, do_sample=True)
+
+                    input_data, final_output, output_records = create_multi_step_next_input_batch_fn(input_data,
+                                                                                                     model_input,
+                                                                                                     model_output,
+                                                                                                     continue_list)
+                    final_output_list += [final_output]
+                    output_records_list += [output_records]
+
+                    continue_list, result_list = compile_code_ids_list(final_output, continue_list, result_list, vocabulary=vocabulary,
+                                                          includes_list=extract_includes_fn(input_data), file_path=file_path)
+                    result_records_list += [result_list]
+                    if sum(continue_list) == 0:
+                        break
+
+                step_output = 'in evaluate step {}: '.format(steps)
+                res = compile_evaluator.add_result(result_list)
+                step_output += res
+                for evaluator in evaluate_obj_list:
+                    # customer evaluator interface
+                    res = evaluator.add_result(result_list, batch_data=batch_data)
+                    step_output += res
+                # print(step_output)
+                info(step_output)
+
+                if print_output and steps % 10 == 0:
+                    print_output_fn(output_records=output_records_list, final_output=final_output_list, batch_data=batch_data,
+                                    step_i=steps, vocabulary=vocabulary, compile_result_list=result_records_list)
+
+
+                steps += 1
+                pbar.update(batch_size)
+    evaluate_obj_list = [compile_evaluator] + evaluate_obj_list
+
+    return evaluate_obj_list, (total_loss / steps).item()
+
+
 def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch_data_fn, parse_target_batch_data_fn,
              do_sample=False, print_output=False, create_output_ids_fn=None, evaluate_obj_list=[],
              expand_output_and_target_fn=None, add_data_record_fn=None, db_path='', table_name=''):
@@ -287,12 +356,13 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        parse_input_batch_data_fn, parse_target_batch_data_fn,
                        create_output_ids_fn, evaluate_obj_list,
                        load_previous=False, is_debug=False, epoch_ratio=1.0, clip_norm=1,
-                       do_sample_evaluate=False, print_output=False, expand_output_and_target_fn=None,
+                       do_sample_evaluate=False, print_output=False, print_output_fn=None, expand_output_and_target_fn=None,
                        addition_train=False, addition_train_remain_frac=1.0, addition_epoch_ratio=0.4,
                        start_epoch=0, ac_copy_train=False, ac_copy_radio=1.0,
-                       do_sample_and_save=False, db_path=None, table_basename=None,
-                       do_multi_step_evaluate=False, max_sample_times=1, compile_file_path=None, multi_step_no_target=False,
-                       add_data_record_fn=None):
+                       do_sample_and_save=False, db_path=None, table_basename=None, add_data_record_fn=None,
+                       max_step_times=1, compile_file_path=None, do_multi_step_sample_evaluate=False,
+                       create_multi_step_next_input_batch_fn=None, extract_includes_fn=None,
+                       multi_step_sample_evaluator=[], vocabulary=None):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -338,8 +408,10 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                        add_data_record_fn=add_data_record_fn,
                                                        db_path=db_path, table_name=table_basename+'_test')
             print('sample and save evaluator : '.format(sample_test_loss))
+            info('sample and save evaluator : '.format(sample_test_loss))
             for evaluator in sample_and_save_evalutor:
                 print(evaluator)
+                info(evaluator)
 
             sample_and_save_evalutor = sample_and_save(model=model, dataset=valid_dataset, batch_size=batch_size,
                                                        loss_function=train_loss_fn, do_sample=True,
@@ -352,8 +424,10 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                        add_data_record_fn=add_data_record_fn,
                                                        db_path=db_path, table_name=table_basename+'_valid')
             print('sample and save evaluator : '.format(sample_test_loss))
+            info('sample and save evaluator : '.format(sample_test_loss))
             for evaluator in sample_and_save_evalutor:
                 print(evaluator)
+                info(evaluator)
 
             sample_and_save_evalutor = sample_and_save(model=model, dataset=train_dataset, batch_size=batch_size,
                                                        loss_function=train_loss_fn, do_sample=True,
@@ -367,30 +441,32 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                        db_path=db_path,
                                                        table_name=table_basename+'_train')
             print('sample and save evaluator : '.format(sample_test_loss))
+            info('sample and save evaluator : '.format(sample_test_loss))
             for evaluator in sample_and_save_evalutor:
                 print(evaluator)
+                info(evaluator)
             return
 
-        if do_multi_step_evaluate:
-            pass
-            # sample_valid_compile = 0
-            # first_sample_valid_compile = 0
-            # # sample_valid_compile, sample_valid_accuracy, sample_valid_correct, first_sample_valid_compile = evaluate_multi_step(model=model, dataset=valid_dataset,
-            # #          batch_size=batch_size, do_sample=True, vocab=vocabulary, print_output=print_output,
-            # #          max_sample_times=max_sample_times, file_path=compile_file_path)
-            # sample_test_compile, sample_test_accuracy, sample_test_correct, first_sample_test_compile = evaluate_multi_step(
-            #     model=model, dataset=test_dataset, batch_size=batch_size, do_sample=True, vocab=vocabulary,
-            #     print_output=print_output, max_sample_times=max_sample_times, file_path=compile_file_path,
-            #     no_target=multi_step_no_target)
-            # evaluate_output = 'evaluate in multi step: sample valid compile: {}, sample test compile: {}, ' \
-            #                   'first_sample_valid_compile: {}, first_sample_test_compile: {}' \
-            #                   'sample valid accuracy: {}, sample test accuracy: {}, ' \
-            #                   'sample valid correct: {}, sample test correct: {}'.format(
-            #     sample_valid_compile, sample_test_compile, first_sample_valid_compile, first_sample_test_compile,
-            #     sample_valid_accuracy, sample_test_accuracy, sample_valid_correct,
-            #     sample_test_correct)
-            # print(evaluate_output)
-            # info(evaluate_output)
+        if do_multi_step_sample_evaluate:
+            multi_step_test_evalutor, sample_test_loss = multi_step_evaluate(model=model, dataset=test_dataset,
+                                                              batch_size=batch_size, do_sample=True,
+                                                              print_output=print_output,
+                                                              parse_input_batch_data_fn=parse_input_batch_data_fn,
+                                                              parse_target_batch_data_fn=parse_target_batch_data_fn,
+                                                              create_output_ids_fn=create_output_ids_fn,
+                                                              evaluate_obj_list=multi_step_sample_evaluator,
+                                                              expand_output_and_target_fn=expand_output_and_target_fn,
+                                                             extract_includes_fn=extract_includes_fn,
+                                                             vocabulary=vocabulary, file_path=compile_file_path,
+                                                                             max_step_times=max_step_times,
+                                                                             create_multi_step_next_input_batch_fn = create_multi_step_next_input_batch_fn,
+                                                                             print_output_fn=print_output_fn)
+            print('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
+            info('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
+            for evaluator in multi_step_test_evalutor:
+                print(evaluator)
+                info(evaluator)
+            return
 
         if do_sample_evaluate:
             # sample_valid_loss, sample_valid_accuracy, sample_valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
@@ -409,8 +485,10 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                               evaluate_obj_list=evaluate_obj_list,
                                                               expand_output_and_target_fn=expand_output_and_target_fn)
             print('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
+            info('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             for evaluator in sample_test_evalutor:
                 print(evaluator)
+                info(evaluator)
         evaluate_output = 'evaluate: valid loss of {}, test loss of {}, ' \
                           'valid_accuracy result of {}, test_accuracy result of {}, ' \
                           'valid correct result of {}, test correct result of {}, ' \
@@ -459,8 +537,10 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                             create_output_ids_fn=create_output_ids_fn,
                                             evaluate_obj_list=evaluate_obj_list, )
         print('epoch: {} loss: {}, train evaluator : '.format(epoch, train_loss))
+        info('epoch: {} loss: {}, train evaluator : '.format(epoch, train_loss))
         for evaluator in train_evaluator:
             print(evaluator)
+            info(evaluator)
 
         valid_evaluator, valid_loss = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
                                                loss_function=train_loss_fn,
@@ -470,8 +550,10 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                evaluate_obj_list=evaluate_obj_list,
                                                expand_output_and_target_fn=expand_output_and_target_fn)
         print('epoch: {} loss: {}, valid evaluator : '.format(epoch, valid_loss))
+        info('epoch: {} loss: {}, valid evaluator : '.format(epoch, valid_loss))
         for evaluator in valid_evaluator:
             print(evaluator)
+            info(evaluator)
         test_evaluator, test_loss = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
                                              loss_function=train_loss_fn,
                                              parse_input_batch_data_fn=parse_input_batch_data_fn,
@@ -480,8 +562,10 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                              evaluate_obj_list=evaluate_obj_list,
                                              expand_output_and_target_fn=expand_output_and_target_fn, )
         print('epoch: {} loss: {}, test evaluator : '.format(epoch, test_loss))
+        info('epoch: {} loss: {}, test evaluator : '.format(epoch, test_loss))
         for evaluator in test_evaluator:
             print(evaluator)
+            info(evaluator)
 
         if not is_debug:
             torch_util.save_model(model, save_path+str(epoch))
@@ -543,6 +627,16 @@ if __name__ == '__main__':
     db_path = p_config.get('db_path', None)
     table_basename = p_config.get('table_basename', None)
     create_output_ids_fn = p_config['create_output_ids_fn']
+    vocabulary = p_config['vocabulary']
+
+    do_multi_step_sample_evaluate = p_config['do_multi_step_sample_evaluate']
+    max_step_times = p_config['max_step_times']
+    create_multi_step_next_input_batch_fn = p_config['create_multi_step_next_input_batch_fn']
+    compile_file_path = p_config['compile_file_path']
+    extract_includes_fn = p_config['extract_includes_fn']
+    print_output = p_config['print_output']
+    print_output_fn = p_config['print_output_fn']
+
     model_path = os.path.join(save_root_path, p_config['load_model_name'])
     model = get_model(
         p_config['model_fn'],
@@ -554,9 +648,12 @@ if __name__ == '__main__':
     )
 
     train_data, val_data, test_data, ac_copy_data = p_config.get("data")
-    print("The size of train data: {}".format(len(train_data)))
-    print("The size of val data: {}".format(len(val_data)))
-    print("The size of test data: {}".format(len(test_data)))
+    if train_data is not None:
+        print("The size of train data: {}".format(len(train_data)))
+    if val_data is not None:
+        print("The size of val data: {}".format(len(val_data)))
+    if test_data is not None:
+        print("The size of test data: {}".format(len(test_data)))
     train_and_evaluate(model=model, batch_size=batch_size, train_dataset=train_data, valid_dataset=val_data, test_dataset=test_data,
                        ac_copy_dataset=ac_copy_data,
                        learning_rate=learning_rate, epoches=epoches, saved_name=save_name, train_loss_fn=train_loss_fn,
@@ -564,13 +661,15 @@ if __name__ == '__main__':
                        parse_input_batch_data_fn=parse_input_batch_data_fn, parse_target_batch_data_fn=parse_target_batch_data_fn,
                        create_output_ids_fn=create_output_ids_fn, evaluate_obj_list=evaluate_object_list,
                        load_previous=load_previous, is_debug=is_debug, epoch_ratio=epoch_ratio, clip_norm=clip_norm, start_epoch=start_epoch,
-                       do_sample_evaluate=do_sample_evaluate, print_output=False,
+                       do_sample_evaluate=do_sample_evaluate, print_output=print_output, print_output_fn=print_output_fn,
                        ac_copy_train=ac_copy_train, ac_copy_radio=ac_copy_radio,
                        addition_train=False, addition_train_remain_frac=1.0, addition_epoch_ratio=0.4,
-                       do_multi_step_evaluate=False, max_sample_times=1, compile_file_path=None, multi_step_no_target=False,
+                       max_step_times=max_step_times, compile_file_path=compile_file_path, do_multi_step_sample_evaluate=do_multi_step_sample_evaluate,
                        expand_output_and_target_fn=expand_output_and_target_fn,
                        do_sample_and_save=do_sample_and_save, add_data_record_fn=add_data_record_fn, db_path=db_path,
-                       table_basename=table_basename)
+                       table_basename=table_basename, vocabulary=vocabulary,
+                       create_multi_step_next_input_batch_fn=create_multi_step_next_input_batch_fn,
+                       extract_includes_fn=extract_includes_fn)
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)

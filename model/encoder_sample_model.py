@@ -11,6 +11,7 @@ import more_itertools
 
 from common.graph_embedding import GGNNLayer, MultiIterationGraph
 from common import torch_util, util
+from common.logger import info
 from common.problem_util import to_cuda
 from common.torch_util import create_sequence_length_mask, Update, MaskOutput, expand_tensor_sequence_list_to_same, \
     SequenceMaskOutput, expand_tensor_sequence_len, expand_tensor_sequence_to_same, DynamicDecoder, \
@@ -454,21 +455,9 @@ def parse_input_batch_data_fn(batch_data, do_sample):
 
 def create_output_ids_fn(end_id):
     def create_output_ids(model_output, model_input, do_sample=False):
-        p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens = model_output
-        if do_sample:
-            compatible_tokens = output_compatible_tokens
-        else:
-            compatible_tokens = model_input[8]
-        p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
-        p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
-        is_copy = torch.squeeze(is_copy, dim=-1) > 0.5
-        copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
-        sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
-        sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
-
-        input_seq = model_input[1]
-        copy_ids = torch.gather(input_seq, index=copy_output_id, dim=-1)
-        sample_output_ids = torch.where(is_copy, copy_ids, sample_output)
+        output_record_list = create_records_all_output(model_input=model_input, model_output=model_output,
+                                                       do_sample=do_sample)
+        p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = output_record_list
 
         sample_output_ids_list = sample_output_ids.tolist()
         effect_sample_output_list = []
@@ -480,11 +469,14 @@ def create_output_ids_fn(end_id):
                 pass
             effect_sample_output_list += [sample]
 
+        input_seq = model_input[1]
+        input_seq_len = model_input[2].tolist()
         input_seq_list = torch.unbind(input_seq, dim=0)
         final_output = []
         for i, one_input in enumerate(input_seq_list):
             effect_sample = effect_sample_output_list[i]
-            one_output = torch.cat([one_input[1:p1[i]+1], torch.LongTensor(effect_sample).to(one_input.device), one_input[p2[i]:-1]], dim=-1)
+            input_len = input_seq_len[i]
+            one_output = torch.cat([one_input[1:p1[i]+1], torch.LongTensor(effect_sample).to(one_input.device), one_input[p2[i]:input_len-1]], dim=-1)
             final_output += [one_output]
         # pad output tensor in python list final output
         final_output = expand_tensor_sequence_list_to_same(final_output, dim=0, fill_value=0)
@@ -510,4 +502,106 @@ def expand_output_and_target_fn(ignore_token):
         model_output[5] = expand_tensor_sequence_len(model_output[5], max_expand_len)
         return model_output, model_target
     return expand_output_and_target
+
+
+def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id):
+    def create_multi_step_next_input_batch(input_data, model_input, model_output, continue_list):
+        output_record_list = create_records_all_output(model_input=model_input, model_output=model_output, do_sample=True)
+        p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = output_record_list
+
+        sample_output_ids_list = sample_output_ids.tolist()
+        effect_sample_output_list = []
+        for sample in sample_output_ids_list:
+            try:
+                end_pos = sample.index(inner_end_id)
+                sample = sample[:end_pos]
+            except ValueError as e:
+                pass
+            effect_sample_output_list += [sample]
+
+        input_seq = input_data['input_seq']
+        final_output = []
+        for i, one_input in enumerate(input_seq):
+            effect_sample = effect_sample_output_list[i]
+            one_output = one_input[1:p1[i] + 1] + effect_sample + one_input[p2[i]:-1]
+            final_output += [one_output]
+
+        next_input = [[begin_id] + one + [end_id] for one in final_output]
+        next_input = [next_inp if con else ori_inp for ori_inp, next_inp, con in
+                      zip(input_data['input_seq'], next_input, continue_list)]
+        next_input_len = [len(one) for one in next_input]
+        final_output = [next_inp[1:-1] for next_inp in next_input]
+
+        input_data['input_seq'] = next_input
+        input_data['input_length'] = next_input_len
+        input_data['copy_length'] = next_input_len
+        return input_data, final_output, output_record_list
+    return create_multi_step_next_input_batch
+
+
+def create_records_all_output(model_input, model_output, do_sample=False):
+    p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens = model_output
+    if do_sample:
+        compatible_tokens = output_compatible_tokens
+    else:
+        compatible_tokens = model_input[8]
+    p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
+    p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
+    is_copy = torch.squeeze(is_copy, dim=-1) > 0.5
+    copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
+    sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
+    sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
+
+    input_seq = model_input[1]
+    copy_ids = torch.gather(input_seq, index=copy_output_id, dim=-1)
+    sample_output_ids = torch.where(is_copy, copy_ids, sample_output)
+    return p1, p2, is_copy, copy_ids, sample_output, sample_output_ids
+
+
+def multi_step_print_output_records_fn(inner_end_id):
+
+    def multi_step_print_output_records(output_records, final_output, batch_data, step_i, vocabulary, compile_result_list):
+        # info('------------------------------- in step {} ------------------------------------'.format(step_i))
+        id_to_word_fn = lambda x: [vocabulary.id_to_word(t) for t in x]
+        id_to_code_fn = lambda x: ' '.join(id_to_word_fn(x))
+        step_times = len(final_output)
+        batch_size = len(final_output[0])
+        output_records_list = [[p.tolist() for p in o] for o in output_records]
+        for i in range(batch_size):
+            info('------------------------------- in step {} {}th code ------------------------------------'.format(step_i, i))
+            inp_code = id_to_code_fn(batch_data['input_seq'][i][1:-1])
+            info('input  data: {}'.format(inp_code))
+            for j in range(step_times):
+                info('------------------------------- in step {} {}th code {} iter ------------------------------------'.format(step_i, i, j))
+                p1 = output_records_list[j][0][i]
+                p2 = output_records_list[j][1][i]
+                sample_output_ids = output_records_list[j][5][i]
+                try:
+                    end_pos = sample_output_ids.index(inner_end_id)
+                    end_pos += 1
+                except ValueError as e:
+                    end_pos = len(sample_output_ids)
+
+                is_copy = output_records_list[j][2][i][:end_pos]
+                copy_ids = output_records_list[j][3][i][:end_pos]
+                copy_words = id_to_word_fn(copy_ids)
+                copy_words = [w if c == 1 else '<SAMPLE>' for c, w in zip(is_copy, copy_words)]
+                sample_output = output_records_list[j][4][i][:end_pos]
+                sample_words = id_to_word_fn(sample_output)
+                sample_words = ['<COPY>' if c== 1 else s for c, s in zip(is_copy, sample_words)]
+                sample_output_ids = output_records_list[j][5][i][:end_pos]
+
+                out = final_output[j][i]
+                res = compile_result_list[j][i]
+                info('compile result: {}'.format(res))
+                out_code = id_to_code_fn(out)
+                info('output data: {}'.format(out_code))
+                info('position: {}, {}'.format(p1, p2))
+                is_copy_str = [str(c) for c in is_copy]
+                info('is_copy: {}'.format(' '.join(is_copy_str)))
+                info('copy_output: {}'.format(' '.join(copy_words)))
+                info('sample output: {}'.format(' '.join(sample_words)))
+                info('part output: {}'.format(id_to_code_fn(sample_output_ids)))
+
+    return multi_step_print_output_records
 

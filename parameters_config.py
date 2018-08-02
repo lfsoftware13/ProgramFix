@@ -197,8 +197,11 @@ def encoder_sample_config1(is_debug):
     max_length = 500
     do_flatten = True
 
-    from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
+        load_deeffix_error_iterative_dataset_real_test
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer, do_flatten=do_flatten)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
                                                      mask_transformer=transformer, do_flatten=do_flatten)
 
     # if is_debug:
@@ -218,17 +221,20 @@ def encoder_sample_config1(is_debug):
     #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length))
     #     datasets.append(None)
 
-    train_len = len(datasets[0])
+    # train_len = len(datasets[0])
+    train_len = 100
 
     from model.encoder_sample_model import EncoderSampleModel
     from model.encoder_sample_model import create_parse_target_batch_data
     from model.encoder_sample_model import create_loss_fn
     from model.encoder_sample_model import create_output_ids_fn
     from model.encoder_sample_model import expand_output_and_target_fn
+    from model.encoder_sample_model import create_multi_step_next_input_batch_fn
+    from model.encoder_sample_model import multi_step_print_output_records_fn
     return {
         'name': 'encoder_sample_dropout',
         'save_name': 'encoder_sample_dropout.pkl',
-        'load_model_name': 'encoder_sample_dropout.pkl',
+        'load_model_name': 'encoder_sample_dropout_no_overfitting.pkl',
         'logger_file_path': 'encoder_sample_dropout.log',
 
         'model_fn': EncoderSampleModel,
@@ -258,6 +264,15 @@ def encoder_sample_config1(is_debug):
                        },
 
         'do_sample_evaluate': False,
+
+        'do_multi_step_sample_evaluate': True,
+        'max_step_times': 10,
+        'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id),
+        'compile_file_path': 'tmp/main.c',
+        'extract_includes_fn': lambda x: x['includes'],
+        'multi_step_sample_evaluator': [],
+        'print_output': True,
+        'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'vocabulary': vocabulary,
         'parse_input_batch_data_fn': parse_input_batch_data_fn,

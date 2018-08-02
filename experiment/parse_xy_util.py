@@ -212,7 +212,7 @@ CHANGE = 0
 INSERT = 1
 DELETE = 2
 
-def parse_test_tokens(df, data_type, keyword_vocab, tokenize_fn):
+def parse_test_tokens(df, data_type, keyword_vocab, tokenize_fn, add_begin_end_label=False):
     df['code_tokens'] = df['code'].map(tokenize_fn)
     df = df[df['code_tokens'].map(lambda x: x is not None)].copy()
     df['code_tokens'] = df['code_tokens'].map(list)
@@ -221,6 +221,11 @@ def parse_test_tokens(df, data_type, keyword_vocab, tokenize_fn):
     df['code_words'] = df['code_tokens'].map(create_name_list_by_LexToken)
     transform_word_to_id_fn = lambda name_list: keyword_vocab.parse_text([name_list], False)[0]
     df['error_code_word_id'] = df['code_words'].map(transform_word_to_id_fn)
+    if add_begin_end_label:
+        begin_id = keyword_vocab.word_to_id(keyword_vocab.begin_tokens[0])
+        end_id = keyword_vocab.word_to_id(keyword_vocab.end_tokens[0])
+        add_fn = lambda x: [begin_id] + x + [end_id]
+        df['error_code_word_id'] = df['error_code_word_id'].map(add_fn)
     return df['error_code_word_id']
 
 
