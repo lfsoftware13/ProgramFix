@@ -63,6 +63,14 @@ class CodeGraph(object):
     def graph_length(self):
         return self._max_id
 
+    @property
+    def graph(self):
+        """
+        :return: (the graph node list(type is str),
+                the link in the graph(a tuple list(node1_id:int, node2_id:int, link_type:str)))
+        """
+        return self._graph_, self._link_tuple_list
+
     def _generate_position_to_id(self, tokens):
         res = {}
         for i, token in enumerate(tokens):
