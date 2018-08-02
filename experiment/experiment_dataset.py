@@ -102,6 +102,7 @@ class IterateErrorDataSet(CustomerDataSet):
         # sample = dict(row)
         sample = {}
         sample['input_seq'] = row['error_token_id_list']
+        sample['input_seq_name'] = row['error_token_name_list'][1:-1]
         sample['includes'] = row['includes']
         if not self.is_flatten:
             sample['input_length'] = [len(ids) for ids in sample['input_seq']]

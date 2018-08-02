@@ -294,17 +294,20 @@ def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False):
                   'sample_ac_id_list': train_data[2], 'ac_pos_list': train_data[3],
                   'error_pos_list': train_data[4], 'includes': train['includes'],
                   'distance': train['distance'], 'ac_code_ids': train_data[5],
-                  'is_copy_list': train_data[6], 'copy_pos_list': train_data[7], 'sample_mask_list': train_data[8]}
+                  'is_copy_list': train_data[6], 'copy_pos_list': train_data[7], 'sample_mask_list': train_data[8],
+                  'error_token_name_list': train_data[9]}
     valid_dict = {'error_token_id_list': valid_data[0], 'sample_error_id_list': valid_data[1],
                   'sample_ac_id_list': valid_data[2], 'ac_pos_list': valid_data[3],
                   'error_pos_list': valid_data[4], 'includes': valid['includes'],
                   'distance': valid['distance'], 'ac_code_ids': valid_data[5],
-                  'is_copy_list': valid_data[6], 'copy_pos_list': valid_data[7], 'sample_mask_list': valid_data[8]}
+                  'is_copy_list': valid_data[6], 'copy_pos_list': valid_data[7], 'sample_mask_list': valid_data[8],
+                  'error_token_name_list': valid_data[9]}
     test_dict = {'error_token_id_list': test_data[0], 'sample_error_id_list': test_data[1],
-                  'sample_ac_id_list': test_data[2], 'ac_pos_list': test_data[3],
-                  'error_pos_list': test_data[4], 'includes': test['includes'],
-                  'distance': test['distance'], 'ac_code_ids': test_data[5],
-                 'is_copy_list': test_data[6], 'copy_pos_list': test_data[7], 'sample_mask_list': test_data[8]}
+                 'sample_ac_id_list': test_data[2], 'ac_pos_list': test_data[3],
+                 'error_pos_list': test_data[4], 'includes': test['includes'],
+                 'distance': test['distance'], 'ac_code_ids': test_data[5],
+                 'is_copy_list': test_data[6], 'copy_pos_list': test_data[7], 'sample_mask_list': test_data[8],
+                 'error_token_name_list': test_data[9]}
 
     if do_flatten:
         train_dict = flatten_iterative_data(train_dict)
@@ -342,17 +345,20 @@ def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False):
                   'sample_ac_id_list': train_data[2], 'ac_pos_list': train_data[3],
                   'error_pos_list': train_data[4], 'includes': train['includes'],
                   'distance': train['distance'], 'ac_code_ids': train_data[5],
-                  'is_copy_list': train_data[6], 'copy_pos_list': train_data[7], 'sample_mask_list': train_data[8]}
+                  'is_copy_list': train_data[6], 'copy_pos_list': train_data[7], 'sample_mask_list': train_data[8],
+                  'error_token_name_list': train_data[9]}
     valid_dict = {'error_token_id_list': valid_data[0], 'sample_error_id_list': valid_data[1],
                   'sample_ac_id_list': valid_data[2], 'ac_pos_list': valid_data[3],
                   'error_pos_list': valid_data[4], 'includes': valid['includes'],
                   'distance': valid['distance'], 'ac_code_ids': valid_data[5],
-                  'is_copy_list': valid_data[6], 'copy_pos_list': valid_data[7], 'sample_mask_list': valid_data[8]}
+                  'is_copy_list': valid_data[6], 'copy_pos_list': valid_data[7], 'sample_mask_list': valid_data[8],
+                  'error_token_name_list': valid_data[9]}
     test_dict = {'error_token_id_list': test_data[0], 'sample_error_id_list': test_data[1],
                   'sample_ac_id_list': test_data[2], 'ac_pos_list': test_data[3],
                   'error_pos_list': test_data[4], 'includes': test['includes'],
                   'distance': test['distance'], 'ac_code_ids': test_data[5],
-                 'is_copy_list': test_data[6], 'copy_pos_list': test_data[7], 'sample_mask_list': test_data[8]}
+                 'is_copy_list': test_data[6], 'copy_pos_list': test_data[7], 'sample_mask_list': test_data[8],
+                 'error_token_name_list': test_data[9]}
 
     if do_flatten:
         train_dict = flatten_iterative_data(train_dict)
@@ -395,22 +401,24 @@ def flatten_iterative_data(data_dict):
         is_copy_list = data_dict['is_copy_list'].iloc[i]
         copy_pos_list = data_dict['copy_pos_list'].iloc[i]
         sample_mask_list = data_dict['sample_mask_list'].iloc[i]
+        error_token_name_list = data_dict['error_token_name_list'].iloc[i]
         c = 0
-        for error_token_id, sample_error_id, sample_ac_id, ac_pos, error_pos, is_copy, copy_pos in \
+        for error_token_id, sample_error_id, sample_ac_id, ac_pos, error_pos, is_copy, copy_pos, error_token_name in \
             zip(error_token_id_list, sample_error_id_list, sample_ac_id_list, ac_pos_list, error_pos_list,
-                is_copy_list, copy_pos_list):
+                is_copy_list, copy_pos_list, error_token_name_list):
             if (c+1) < len(error_token_id_list):
                 target_ac_token_id = error_token_id_list[c+1]
             else:
                 target_ac_token_id = ac_code_ids
             one = (error_token_id, sample_error_id, sample_ac_id, ac_pos, error_pos, includes, distance, ac_code_ids,
-                   is_copy, copy_pos, sample_mask_list, target_ac_token_id)
+                   is_copy, copy_pos, sample_mask_list, target_ac_token_id, error_token_name)
             records += [one]
             c += 1
 
     for key, v in zip(['error_token_id_list', 'sample_error_id_list', 'sample_ac_id_list', 'ac_pos_list',
                        'error_pos_list', 'includes', 'distance', 'ac_code_ids', 'is_copy_list',
-                       'copy_pos_list', 'sample_mask_list', 'target_ac_token_id_list'], zip(*records)):
+                       'copy_pos_list', 'sample_mask_list', 'target_ac_token_id_list',
+                       'error_token_name_list'], zip(*records)):
         flatten_dict[key] = pd.Series(v)
     return flatten_dict
 

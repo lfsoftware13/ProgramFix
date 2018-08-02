@@ -199,10 +199,10 @@ def encoder_sample_config1(is_debug):
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
-    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-    #                                                  mask_transformer=transformer, do_flatten=do_flatten)
-    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
                                                      mask_transformer=transformer, do_flatten=do_flatten)
+    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer, do_flatten=do_flatten)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -221,8 +221,7 @@ def encoder_sample_config1(is_debug):
     #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length))
     #     datasets.append(None)
 
-    # train_len = len(datasets[0])
-    train_len = 100
+    train_len = len(datasets[0]) if datasets[0] is not None else 100
 
     from model.encoder_sample_model import EncoderSampleModel
     from model.encoder_sample_model import create_parse_target_batch_data
@@ -265,7 +264,7 @@ def encoder_sample_config1(is_debug):
 
         'do_sample_evaluate': False,
 
-        'do_multi_step_sample_evaluate': True,
+        'do_multi_step_sample_evaluate': False,
         'max_step_times': 10,
         'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id),
         'compile_file_path': 'tmp/main.c',
