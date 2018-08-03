@@ -18,8 +18,10 @@ class AstParser(CParser):
 
 
 def ast_parse(code):
-    c_parser = AstParser()
-    c_parser.build(lexer=BufferedCLex)
+    if getattr(ast_parse, "parser", None) is None:
+        ast_parse.parser = AstParser()
+        ast_parse.parser.build(lexer=BufferedCLex)
+    c_parser = ast_parse.parser
     try:
         ast = c_parser.parse(code)
         ast = [ast]
@@ -34,12 +36,13 @@ Coordinate = namedtuple("Coordinate", ["x", "y"])
 class CodeGraph(object):
     def __init__(self, tokens, ast_list):
         self._tokens = tokens
-        self._max_id = len(tokens)
         self._code_legth = len(tokens)
         self._pos_to_id_dict = self._generate_position_to_id(tokens)
         self._ast_list = ast_list
-        self._graph_ = [t.value for t in tokens]
         self._link_tuple_list = [] # a tuple list (id1, id2, link_name)
+        self._graph_ = [t.value for t in tokens]
+        self._graph_.append("<Delimiter>")
+        self._max_id = len(self._graph_)
         self._name_pattern = re.compile(r'(.+)\[\d+\]')
         self._parse_ast_list(ast_list)
 
@@ -78,6 +81,8 @@ class CodeGraph(object):
         return res
 
     def _get_token_id_by_position(self, coord):
+        # if coord is None:
+        #     return None
         key = Coordinate(coord.line, coord.column)
         if key in self._pos_to_id_dict:
             return self._pos_to_id_dict[key]
@@ -118,6 +123,11 @@ class CodeGraph(object):
         res += "\n".join(["{}:{}->{}:{} type:{}".format(link[0], self._graph_[link[0]], link[1], self._graph_[link[1]],
                                                        link[2]) for link in self._link_tuple_list])
         return res
+
+
+def parse_ast_code_graph(token_list):
+    ast, tokens = ast_parse("\n"+" ".join(token_list))
+    return CodeGraph(tokens, ast)
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ import torch
 import math
 import torch.nn.functional as F
 import pandas as pd
+from toolz.sandbox import unzip
 from torch.utils.data import Dataset
 import more_itertools
 
@@ -110,6 +111,26 @@ class RNNGraphWrapper(nn.Module):
         return o
 
 
+class MixedRNNGraphWrapper(nn.Module):
+    def __init__(self,
+                 hidden_size,
+                 rnn_parameter,
+                 graph_type,
+                 graph_itr,
+                 ):
+        super().__init__()
+        self.rnn = RNNGraphWrapper(hidden_size, rnn_parameter)
+        self.graph_itr = graph_itr
+        if graph_type == 'ggnn':
+            self.graph = GGNNLayer(hidden_size)
+
+    def forward(self, x, adj):
+        for _ in range(self.graph_itr):
+            x = x + self.rnn(x, adj)
+            x = x + self.graph(x, adj)
+        return x
+
+
 class GraphEncoder(nn.Module):
     def __init__(self,
                  hidden_size=300,
@@ -139,6 +160,8 @@ class GraphEncoder(nn.Module):
             self.graph = MultiIterationGraph(GGNNLayer(hidden_state_size=hidden_size), **graph_parameter)
         elif graph_embedding == 'rnn':
             self.graph = RNNGraphWrapper(hidden_size=hidden_size, parameter=graph_parameter)
+        elif graph_embedding == 'mixed':
+            self.graph = MixedRNNGraphWrapper(hidden_size, **graph_parameter)
 
     def forward(self,
                 adjacent_matrix,
@@ -222,7 +245,7 @@ class EncoderSampleModel(nn.Module):
         :param embedding_size: The embedding size
         :param hidden_size: The hidden state size in the model
         :param max_sample_length: The max length to sample
-        :param graph_embedding: The graph propagate method, option:["ggnn", "graph_attention", "rnn"]
+        :param graph_embedding: The graph propagate method, option:["ggnn", "graph_attention", "rnn", "mixed]
         :param pointer_type: The method to point out the begin and the end, option:["itr", "query"]
         :param rnn_type: The rnn type used in the model, option:["lstm", "gru"]
         :param rnn_layer_number: The number of layer in this model
@@ -281,7 +304,7 @@ class EncoderSampleModel(nn.Module):
                                             encoder_outputs=input_seq, encoder_mask=~encoder_mask,
                                             teacher_forcing_ratio=1)
         decoder_output = torch.stack(decoder_output, dim=1)
-        copy_mask = create_sequence_length_mask(copy_length)
+        copy_mask = create_sequence_length_mask(copy_length, max_len=input_seq.shape[1])
         is_copy, copy_output, sample_output = self.output(decoder_output, input_seq, copy_mask, compatible_tokens,
                                                           compatible_tokens_length, is_sample=False,
                                                           copy_target=is_copy_target)
@@ -427,30 +450,48 @@ def create_parse_target_batch_data(ignore_token):
     return parse_target_batch_data
 
 
-def parse_input_batch_data_fn(batch_data, do_sample):
-    def to_long(x):
-        return to_cuda(torch.LongTensor(x))
+def create_parse_input_batch_data_fn(use_ast=False):
+    def parse_input_batch_data_fn(batch_data, do_sample):
+        def to_long(x):
+            return to_cuda(torch.LongTensor(x))
 
-    adjacent_matrix = to_long(batch_data['adj'])
-    input_seq = to_long(PaddedList(batch_data['input_seq']))
-    input_length = to_long(batch_data['input_length'])
-    copy_length = to_long(batch_data['copy_length'])
-    if not do_sample:
-        p1_target = to_long(batch_data['p1_target'])
-        p2_target = to_long(batch_data['p2_target'])
-        target = to_long(PaddedList(batch_data['target']))
-        is_copy_target = to_long(PaddedList(batch_data['is_copy_target']))
-        batch_size = len(batch_data['is_copy_target'])
-        seq_len = is_copy_target.shape[1]
-        max_mask_len = max(max(batch_data['compatible_tokens_length']))
-        compatible_tokens = to_long(PaddedList(batch_data['compatible_tokens'], shape=[batch_size, seq_len, max_mask_len]))
-        compatible_tokens_length = to_long(PaddedList(batch_data['compatible_tokens_length']))
-        return adjacent_matrix, input_seq, input_length, copy_length, p1_target, p2_target, target, \
-               is_copy_target, \
-               compatible_tokens, \
-               compatible_tokens_length
-    else:
-        return adjacent_matrix, input_seq, input_length, copy_length
+
+        if not use_ast:
+            adjacent_matrix = to_long(batch_data['adj'])
+        else:
+            adjacent_tuple = [[[i]+tt for tt in t] for i, t in enumerate(batch_data['adj'])]
+            adjacent_tuple = [list(t) for t in unzip(more_itertools.flatten(adjacent_tuple))]
+            size = max(batch_data['input_length'])
+            adjacent_tuple = torch.LongTensor(adjacent_tuple)
+            adjacent_values = torch.ones(adjacent_tuple.shape[1]).long()
+            adjacent_size = torch.Size([len(batch_data['input_length']), size, size])
+            adjacent_matrix = to_cuda(
+                torch.sparse.LongTensor(
+                    adjacent_tuple,
+                    adjacent_values,
+                    adjacent_size,
+                ).float().to_dense()
+            )
+        input_seq = to_long(PaddedList(batch_data['input_seq']))
+        input_length = to_long(batch_data['input_length'])
+        copy_length = to_long(batch_data['copy_length'])
+        if not do_sample:
+            p1_target = to_long(batch_data['p1_target'])
+            p2_target = to_long(batch_data['p2_target'])
+            target = to_long(PaddedList(batch_data['target']))
+            is_copy_target = to_long(PaddedList(batch_data['is_copy_target']))
+            batch_size = len(batch_data['is_copy_target'])
+            seq_len = is_copy_target.shape[1]
+            max_mask_len = max(max(batch_data['compatible_tokens_length']))
+            compatible_tokens = to_long(PaddedList(batch_data['compatible_tokens'], shape=[batch_size, seq_len, max_mask_len]))
+            compatible_tokens_length = to_long(PaddedList(batch_data['compatible_tokens_length']))
+            return adjacent_matrix, input_seq, input_length, copy_length, p1_target, p2_target, target, \
+                   is_copy_target, \
+                   compatible_tokens, \
+                   compatible_tokens_length
+        else:
+            return adjacent_matrix, input_seq, input_length, copy_length
+    return parse_input_batch_data_fn
 
 
 def create_output_ids_fn(end_id):

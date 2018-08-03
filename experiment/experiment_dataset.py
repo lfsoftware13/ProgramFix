@@ -1,5 +1,7 @@
 import random
 
+from c_parser.ast_parser import parse_ast_code_graph
+from c_parser.pycparser.pycparser import c_ast
 from common.pycparser_util import tokenize_by_clex_fn
 from common.util import CustomerDataSet, show_process_map
 from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data_sample_100, \
@@ -21,13 +23,15 @@ class IterateErrorDataSet(CustomerDataSet):
                  transformer_vocab_slk=None,
                  no_filter=False,
                  do_flatten=False,
-                 MAX_LENGTH=500):
+                 MAX_LENGTH=500,
+                 use_ast=False):
         # super().__init__(data_df, vocabulary, set_type, transform, no_filter)
         self.set_type = set_type
         self.vocabulary = vocabulary
         self.transformer = transformer_vocab_slk
         self.is_flatten = do_flatten
         self.max_length = MAX_LENGTH
+        self.use_ast = use_ast
         self.transform = False
         if data_df is not None:
             if not no_filter:
@@ -91,6 +95,15 @@ class IterateErrorDataSet(CustomerDataSet):
         # df['grammar_mask_list'] = df['ac_code_ids'].map(filter_slk)
         # df = df[df['grammar_mask_list'].map(lambda x: x is not None)]
         # print('after slk grammar: {}'.format(len(df)))
+
+        def test_parse_ast_code_graph(seq_name):
+            try:
+                parse_ast_code_graph(seq_name[1:-1])
+                return True
+            except Exception as e:
+                return False
+
+        df = df[df['error_token_name_list'].map(test_parse_ast_code_graph)]
 
         return df
 
@@ -165,6 +178,16 @@ class IterateErrorDataSet(CustomerDataSet):
         else:
             sample['copy_length'] = sample['input_length']
             sample['adj'] = 0
+
+        if self.use_ast:
+            code_graph = parse_ast_code_graph(sample['input_seq_name'])
+            sample['input_length'] = code_graph.graph_length + 2
+            in_seq, graph = code_graph.graph
+            begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[0])
+            end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[0])
+            sample['input_seq'] = [begin_id] + [self.vocabulary.word_to_id(t) for t in in_seq] + [end_id]
+            sample['adj'] = [[a+1, b+1] for a, b, _ in graph] + [[b+1, a+1] for a, b, _ in graph]
+
         return sample
 
     def add_samples(self, df):
@@ -198,13 +221,16 @@ class IterateErrorDataSet(CustomerDataSet):
         return len(self._samples)
 
 
-def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False):
+def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False):
     if is_debug:
         data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten)
     else:
         data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=do_flatten)
+    if use_ast:
+        vocabulary = load_graph_vocabulary(vocabulary)
+
     datasets = [IterateErrorDataSet(pd.DataFrame(dd), vocabulary, name, transformer_vocab_slk=mask_transformer,
-                                    do_flatten=do_flatten) for dd, name in
+                                    do_flatten=do_flatten, use_ast=use_ast) for dd, name in
                 zip(data_dict, ["train", "all_valid", "all_test"])]
     for d, n in zip(datasets, ["train", "val", "test"]):
         info_output = "There are {} parsed data in the {} dataset".format(len(d), n)
@@ -218,6 +244,20 @@ def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer
     # ac_copy_dataset = CCodeErrorDataSet(pd.DataFrame(ac_copy_data_dict), vocabulary, 'ac_copy',
     #                                     transformer_vocab_slk=mask_transformer, no_filter=True)
     return train_dataset, valid_dataset, test_dataset, None
+
+
+def load_graph_vocabulary(vocabulary):
+    vocabulary.add_token("<Delimiter>")
+    ast_node_dict = c_ast.__dict__
+    for n in sorted(ast_node_dict):
+        s_c = ast_node_dict[n]
+        b_c = c_ast.Node
+        try:
+            if issubclass(s_c, b_c):
+                vocabulary.add_token(n)
+        except Exception as e:
+            pass
+    return vocabulary
 
 
 def load_deeffix_error_iterative_dataset_real_test(vocabulary, mask_transformer, do_flatten=False):
@@ -235,5 +275,5 @@ if __name__ == '__main__':
     tokenize_fn = tokenize_by_clex_fn()
     transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocab)
     train_dataset, _, _, _ = load_deepfix_sample_iterative_dataset(is_debug=True, vocabulary=vocab,
-                                                                   mask_transformer=transformer, do_flatten=True)
+                                                                   mask_transformer=transformer, do_flatten=True, use_ast=True)
     print(len(train_dataset))
