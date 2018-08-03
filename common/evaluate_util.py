@@ -614,6 +614,7 @@ class ErrorPositionAndValueAccuracy(Evaluator):
         self.all_correct = SequenceCorrect(ignore_token=ignore_token)
 
     def add_result(self, output, model_output, model_target, model_input, ignore_token=None, batch_data=None):
+        model_output = [t.data for t in model_output]
         if ignore_token is None:
             ignore_token = self.ignore_token
         is_copy = (model_output[2] > 0.5).float()

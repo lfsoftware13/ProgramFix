@@ -67,6 +67,7 @@ class SliceEncoder(nn.Module):
 
     def _encode(self, seq):
         packed_seq, idx_unsort = torch_util.pack_sequence(seq)
+        # self.rnn.flatten_parameters()
         _, encoded_state = self.rnn(packed_seq)
         return torch.index_select(encoded_state, 1, idx_unsort.to(seq[0].device))
 
@@ -119,14 +120,14 @@ class MixedRNNGraphWrapper(nn.Module):
                  graph_itr,
                  ):
         super().__init__()
-        self.rnn = RNNGraphWrapper(hidden_size, rnn_parameter)
+        self.rnn = nn.ModuleList([RNNGraphWrapper(hidden_size, rnn_parameter) for _ in range(graph_itr)])
         self.graph_itr = graph_itr
         if graph_type == 'ggnn':
             self.graph = GGNNLayer(hidden_size)
 
     def forward(self, x, adj):
-        for _ in range(self.graph_itr):
-            x = x + self.rnn(x, adj)
+        for i in range(self.graph_itr):
+            x = x + self.rnn[i](x, adj)
             x = x + self.graph(x, adj)
         return x
 
@@ -214,7 +215,7 @@ class Output(nn.Module):
         copy_output = torch.bmm(decoder_output, encoder_output.permute(0, 2, 1))
         copy_output.data.masked_fill_(~torch.unsqueeze(copy_mask, dim=1), -float('inf'))
         sample_length_shape = sample_length.shape
-        sample_length_mask = create_sequence_length_mask(sample_length.view(-1, )).view(*list(sample_length_shape), -1)
+        sample_length_mask = create_sequence_length_mask(sample_length.view(-1, ), max_len=sample_mask.shape[-1]).view(*list(sample_length_shape), -1)
         sample_output = self.sample_output(decoder_output, sample_mask, sample_length_mask)
         return is_copy, copy_output, sample_output
 
@@ -298,7 +299,7 @@ class EncoderSampleModel(nn.Module):
             .view(batch_size, self.layer_number, -1)\
             .permute(1, 0, 2)\
             .contiguous()
-        encoder_mask = create_sequence_length_mask(input_length, )
+        encoder_mask = create_sequence_length_mask(input_length, max_len=input_seq.shape[1])
         # do decoder and calculate output
         decoder_output, _, _ = self.decoder(inputs=self.embedding(target), encoder_hidden=slice_state,
                                             encoder_outputs=input_seq, encoder_mask=~encoder_mask,
@@ -455,13 +456,13 @@ def create_parse_input_batch_data_fn(use_ast=False):
         def to_long(x):
             return to_cuda(torch.LongTensor(x))
 
-
         if not use_ast:
             adjacent_matrix = to_long(batch_data['adj'])
         else:
             adjacent_tuple = [[[i]+tt for tt in t] for i, t in enumerate(batch_data['adj'])]
             adjacent_tuple = [list(t) for t in unzip(more_itertools.flatten(adjacent_tuple))]
             size = max(batch_data['input_length'])
+            # print("max length in this batch:{}".format(size))
             adjacent_tuple = torch.LongTensor(adjacent_tuple)
             adjacent_values = torch.ones(adjacent_tuple.shape[1]).long()
             adjacent_size = torch.Size([len(batch_data['input_length']), size, size])

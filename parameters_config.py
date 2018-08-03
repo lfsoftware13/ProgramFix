@@ -309,11 +309,12 @@ def encoder_sample_config2(is_debug):
     tokenize_fn = tokenize_by_clex_fn()
     transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
 
-    batch_size = 10
+    batch_size = 16
     epoches = 80
     ignore_id = -1
     max_length = 500
     do_flatten = True
+    epoch_ratio = 0.35
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -368,7 +369,7 @@ def encoder_sample_config2(is_debug):
              'graph_parameter': {"rnn_parameter": {'vocab_size': vocabulary.vocabulary_size,
                                                    'max_len': max_length, 'input_size': 400,
                                                    'input_dropout_p': 0.2, 'dropout_p': 0.2,
-                                                   'n_layers': 3, 'bidirectional': True, 'rnn_cell': 'gru',
+                                                   'n_layers': 1, 'bidirectional': True, 'rnn_cell': 'gru',
                                                    'variable_lengths': False, 'embedding': None,
                                                    'update_embedding': True},
                                  "graph_type": "ggnn",
@@ -409,13 +410,13 @@ def encoder_sample_config2(is_debug):
 
         'epcohes': epoches,
         'start_epoch': 0,
-        'epoch_ratio': 0.35,
+        'epoch_ratio': epoch_ratio,
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,
         'clip_norm': 1,
         'optimizer': OpenAIAdam,
         'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
-                           't_total': epoches * train_len//batch_size, 'max_grad_norm': 10},
+                           't_total': epoch_ratio * epoches * train_len//batch_size, 'max_grad_norm': 10},
         'data': datasets
     }
 

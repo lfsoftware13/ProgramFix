@@ -98,12 +98,12 @@ class IterateErrorDataSet(CustomerDataSet):
 
         def test_parse_ast_code_graph(seq_name):
             try:
-                parse_ast_code_graph(seq_name[1:-1])
-                return True
-            except Exception as e:
-                return False
+                return parse_ast_code_graph(seq_name[1:-1]).graph_length
 
-        df = df[df['error_token_name_list'].map(test_parse_ast_code_graph)]
+            except Exception as e:
+                return 710
+
+        df = df[df['error_token_name_list'].map(test_parse_ast_code_graph) < 700]
 
         return df
 

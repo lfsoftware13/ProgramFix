@@ -270,9 +270,9 @@ def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False):
 
     train, valid, test = read_fake_common_deepfix_error_dataset_with_limit_length(500)
 
-    train = train.sample(100)
-    valid = valid.sample(100)
-    test = test.sample(100)
+    train = train.sample(1000)
+    valid = valid.sample(1000)
+    test = test.sample(1000)
 
     train = convert_c_code_fields_to_cpp_fields(train, convert_include=False)
     valid = convert_c_code_fields_to_cpp_fields(valid, convert_include=False)

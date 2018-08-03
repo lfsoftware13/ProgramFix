@@ -33,7 +33,7 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
         print("load previous model")
     else:
         print("create new model")
-    if gpu_index is None:
+    if gpu_index is None and not parallel:
         m = m.module.cpu()
     return m
 
@@ -63,7 +63,7 @@ def train(model, dataset, batch_size, loss_function, optimizer, clip_norm, epoch
             for evaluator in evaluate_obj_list:
                 evaluator.add_result(output_ids, model_output, model_target, model_input, batch_data=batch_data)
 
-            total_loss += loss
+            total_loss += loss.data
 
             step_output = 'in train step {}  loss: {}'.format(steps, loss.data.item())
             # print(step_output)
@@ -106,7 +106,7 @@ def evaluate(model, dataset, batch_size, loss_function, parse_input_batch_data_f
                 loss = loss_function(*model_output, *model_target)
 
                 output_ids = create_output_ids_fn(model_output, model_input, do_sample)
-                total_loss += loss
+                total_loss += loss.data
                 total_batch += batch_size
 
                 step_output = 'in evaluate step {}  loss: {}, '.format(steps, loss.data.item())
@@ -271,7 +271,7 @@ def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch
                 # loss = loss_function(*model_output, *model_target)
 
                 output_ids = create_output_ids_fn(model_output, model_input)
-                # total_loss += loss
+                # total_loss += loss.data
                 total_batch += batch_size
 
                 # step_output = 'in evaluate step {}  loss: {}, '.format(steps, loss.data.item())
