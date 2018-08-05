@@ -374,6 +374,163 @@ class DynamicDecoder(object):
         return decoder_output_list, outputs_list, error_list
 
 
+class BeamSearchDynamicDecoder(object):
+    def __init__(self, start_label, end_label, pad_label, decoder_fn, create_beam_next_output_fn, max_length, beam_size=5):
+        self.start_label = start_label
+        self.end_label = end_label
+        self.pad_label = pad_label
+        self.decoder_fn = decoder_fn
+        self.create_beam_next_output_fn = create_beam_next_output_fn
+        self.max_length = max_length
+        self.beam_size = beam_size
+
+    def decoder(self, encoder_output, endocer_hidden, encoder_mask, **kwargs):
+        batch_size = encoder_output.shape[0]
+        continue_mask_stack = to_cuda(torch.ByteTensor([[1 for _ in range(self.beam_size)] for i in range(batch_size)]))
+        beam_outputs = to_cuda(torch.LongTensor([[[self.start_label] for _ in range(self.beam_size)] for i in range(batch_size)]))
+        # outputs_stack = [to_cuda(torch.LongTensor([[self.start_label] for i in range(batch_size)])) for _ in range(self.beam_size)]
+        probability_stack = to_cuda(torch.FloatTensor([[0.0 for _ in range(self.beam_size)] for _ in range(batch_size)]))
+        decoder_output_list = []
+        outputs_list = []
+        hidden_stack = [endocer_hidden for _ in range(self.beam_size)]
+        error_stack = to_cuda(torch.ByteTensor([[0 for _ in range(self.beam_size)] for i in range(batch_size)]))
+
+        for i in range(self.max_length):
+            # beam * (output * [batch, 1, ...])
+            # beam_one_step_decoder_output = []
+            beam_outputs_list = []
+            beam_log_probs_list = []
+            beam_decoder_output_list = []
+            # beam * [batch, hidden]
+            beam_hidden_list = []
+            # beam * [batch, error_count]
+            beam_error_ids = []
+            for b in range(self.beam_size):
+                outputs = beam_outputs[:, b]
+                continue_mask = continue_mask_stack[:, b]
+                hidden = hidden_stack[b]
+                one_step_decoder_output, hidden, error_ids = self.decoder_fn(outputs, continue_mask, start_index=i,
+                                                                             hidden=hidden,
+                                                                             encoder_output=encoder_output,
+                                                                             encoder_mask=encoder_mask,
+                                                                             **kwargs)
+
+                # if (error_ids is not None) and len(error_ids) != 0:
+                error_ids_list = [0 for i in range(batch_size)]
+                for err in error_ids:
+                    error_ids_list[err] = 1
+                error_ids_tensor = to_cuda(torch.ByteTensor(error_ids_list))
+                beam_error_ids += [error_ids_tensor]
+
+                beam_hidden_list += [hidden]
+
+                # one_beam_outputs: [batch, beam, seq]
+                # beam_probs: [batch, beam]
+                # one_beam_decoder_output: tuple of [batch, beam, seq]
+                one_beam_outputs, one_beam_log_probs, one_beam_decoder_output = self.create_beam_next_output_fn(one_step_decoder_output, continue_mask=continue_mask, beam_size=self.beam_size, **kwargs)
+                beam_outputs_list += [one_beam_outputs]
+                beam_log_probs_list += [one_beam_log_probs]
+                beam_decoder_output_list += [one_beam_decoder_output]
+
+                if i == 0:
+                    break
+
+            # beam_step_log_probs: [batch, outer_beam, inner_beam]
+            beam_step_log_probs = torch.stack(beam_log_probs_list, dim=1)
+            if i != 0:
+                beam_total_log_probs = torch.unsqueeze(probability_stack, dim=-1) + torch.squeeze(beam_step_log_probs, dim=-1)
+            else:
+                beam_total_log_probs = torch.squeeze(beam_step_log_probs, dim=-1)
+            probability_stack, sort_index = torch.topk(
+                beam_total_log_probs.view(batch_size, beam_total_log_probs.shape[1] * beam_total_log_probs.shape[2]),
+                k=self.beam_size, dim=-1)
+            stack_sort_index = sort_index / self.beam_size
+
+            # beam_outputs: [batch, outer_beam * inner_beam, seq]
+            beam_outputs = beam_stack_and_reshape(beam_outputs_list)
+            beam_outputs = batch_index_select(beam_outputs, sort_index, batch_size)
+            outputs_list = [batch_index_select(outputs, stack_sort_index, batch_size)
+                            for outputs in outputs_list]
+            outputs_list += [beam_outputs]
+
+            beam_decoder_output = [beam_stack_and_reshape(one_output_list)
+                                   for one_output_list in zip(*beam_decoder_output_list)]
+            beam_decoder_output = [batch_index_select(one_output, sort_index, batch_size)
+                                   for one_output in beam_decoder_output]
+
+            decoder_output_list = [[batch_index_select(one_output, stack_sort_index, batch_size)
+                                    for one_output in decoder_output]
+                                   for decoder_output in decoder_output_list]
+            decoder_output_list += [beam_decoder_output]
+
+            # beam_error = beam_stack_and_reshape(beam_error_ids)
+            beam_error = torch.stack(beam_error_ids, dim=1)
+            beam_error = batch_index_select(beam_error, stack_sort_index, batch_size=batch_size)
+            beam_continue = torch.ne(beam_outputs, self.end_label).view(batch_size, self.beam_size)
+            beam_continue = beam_continue & ~beam_error
+            continue_mask_stack = batch_index_select(continue_mask_stack, stack_sort_index, batch_size) & beam_continue
+            error_stack = batch_index_select(error_stack, stack_sort_index, batch_size) | beam_error
+
+            if isinstance(beam_hidden_list[0], list):
+                one_hidden_list = zip(*beam_hidden_list)
+                hidden_stack = list(zip(*[deal_beam_hidden(one_hidden_beam_list, stack_sort_index, batch_size)
+                                          for one_hidden_beam_list in one_hidden_list]))
+            else:
+                hidden_stack = deal_beam_hidden(beam_hidden_list, stack_sort_index, batch_size)
+
+            # try:
+            if torch.sum(continue_mask_stack) == 0:
+                break
+            # except Exception as e:
+            #     print(e)
+            #     print(error_list)
+            #     print(outputs)
+            #     print(step_continue)
+            #     print(continue_mask)
+            #     raise Exception(e)
+        return decoder_output_list, outputs_list, error_stack
+
+
+def deal_beam_hidden(hidden_list, stack_sort_index, batch_size):
+    # hidden_shape = list(hidden_list[0].shape)
+    hidden_list = [hidden.permute(1, 0, 2) for hidden in hidden_list]
+    # beam_hidden = beam_stack_and_reshape(hidden_list)
+    beam_hidden = torch.stack(hidden_list, dim=1)
+    beam_hidden = batch_index_select(beam_hidden, stack_sort_index, batch_size)
+    hidden_list = torch.unbind(beam_hidden, dim=1)
+    hidden_list = [hidden.permute(1, 0, 2).contiguous() for hidden in hidden_list]
+    return hidden_list
+
+
+def beam_stack_and_reshape(beam_outputs_list):
+    """
+
+    :param beam_outputs_list: a list of tensor [batch, inner_beam, ...]. len(list): outer_beam
+    :return: [batch, outer_beam * inner_beam, ...]
+    """
+    beam_outputs = torch.stack(beam_outputs_list, dim=1)
+    beam_outputs_shape = beam_outputs.shape
+    beam_outputs = beam_outputs.view(beam_outputs_shape[0], -1, *beam_outputs_shape[3:])
+    return beam_outputs
+
+
+def batch_index_select(beam_outputs, sort_index, batch_size):
+    """
+
+    :param beam_outputs_list: Tensor [batch, outer_beam * inner_beam, ...].
+    :param sort_index: [batch, beam]. top beam-th index of log probs tensor [batch, beam * beam]
+    :return:
+    """
+    tensor_list = []
+    # beam_outputs: [batch, outer_beam * inner_beam, seq]
+    for b_idx in range(batch_size):
+        tmp_tensor = torch.index_select(beam_outputs[b_idx], dim=0, index=sort_index[b_idx])
+        tensor_list += [tmp_tensor]
+    # beam_output: [batch, beam, seq]
+    beam_outputs = torch.stack(tensor_list, dim=0)
+    return beam_outputs
+
+
 def pad_last_dim_of_tensor_list(tensor_list, max_len=None, fill_value=0):
     total_len = [tensor.shape[-1] for tensor in tensor_list]
     if max_len is None:

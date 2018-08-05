@@ -103,7 +103,8 @@ class IterateErrorDataSet(CustomerDataSet):
             except Exception as e:
                 return 710
 
-        df = df[df['error_token_name_list'].map(test_parse_ast_code_graph) < 700]
+        if self.use_ast:
+            df = df[df['error_token_name_list'].map(test_parse_ast_code_graph) < 700]
 
         return df
 
@@ -260,10 +261,10 @@ def load_graph_vocabulary(vocabulary):
     return vocabulary
 
 
-def load_deeffix_error_iterative_dataset_real_test(vocabulary, mask_transformer, do_flatten=False):
+def load_deeffix_error_iterative_dataset_real_test(vocabulary, mask_transformer, do_flatten=False, use_ast=False):
     data_dict = load_deepfix_error_data_for_iterate()
     test_dataset = IterateErrorDataSet(pd.DataFrame(data_dict), vocabulary, 'deepfix',
-                                   transformer_vocab_slk=mask_transformer, do_flatten=do_flatten)
+                                   transformer_vocab_slk=mask_transformer, do_flatten=do_flatten, use_ast=use_ast)
     info_output = "There are {} parsed data in the deepfix dataset".format(len(test_dataset))
     print(info_output)
     return None, None, test_dataset, None

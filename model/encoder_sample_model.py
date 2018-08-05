@@ -16,7 +16,7 @@ from common.logger import info
 from common.problem_util import to_cuda
 from common.torch_util import create_sequence_length_mask, Update, MaskOutput, expand_tensor_sequence_list_to_same, \
     SequenceMaskOutput, expand_tensor_sequence_len, expand_tensor_sequence_to_same, DynamicDecoder, \
-    pad_last_dim_of_tensor_list
+    pad_last_dim_of_tensor_list, BeamSearchDynamicDecoder
 from common.util import PaddedList, create_effect_keyword_ids_set
 from seq2seq.models import EncoderRNN, DecoderRNN
 
@@ -239,7 +239,8 @@ class EncoderSampleModel(nn.Module):
                  dropout_p=0.1,
                  pad_label=-1,
                  vocabulary=None,
-                 mask_type='static'
+                 mask_type='static',
+                 beam_size=5
                  ):
         """
         :param vocabulary_size: The size of token vocabulary
@@ -257,6 +258,7 @@ class EncoderSampleModel(nn.Module):
         self.inner_start_label = inner_start_label
         self.inner_end_label = inner_end_label
         self.pad_label = pad_label
+        self.beam_size = beam_size
         self.embedding = nn.Embedding(vocabulary_size, embedding_size)
         self.graph_encoder = GraphEncoder(hidden_size=hidden_size, graph_embedding=graph_embedding,
                                           pointer_type=pointer_type, graph_parameter=graph_parameter,
@@ -274,7 +276,11 @@ class EncoderSampleModel(nn.Module):
         self.hidden_size = hidden_size
 
         self.dynamic_decoder = DynamicDecoder(self.inner_start_label, self.inner_end_label, self.pad_label,
-                                              self.decoder_one_step, self.create_next_output_input, self.max_sample_length)
+                                              self.decoder_one_step, self.create_next_output_input,
+                                              self.max_sample_length)
+        self.beam_dynamic_decoder = BeamSearchDynamicDecoder(self.inner_start_label, self.inner_end_label, self.pad_label,
+                                              self.decoder_one_step, self.beam_create_next_output_input,
+                                              self.max_sample_length, self.beam_size)
         self.vocabulary = vocabulary
         self.keyword_ids_set = create_effect_keyword_ids_set(vocabulary)
         self.mask_type = mask_type
@@ -341,6 +347,44 @@ class EncoderSampleModel(nn.Module):
         pad_compatible_tokens = torch.cat(padded_compatible_tokens_list, dim=1)
         return p1_o, p2_o, is_copy, copy_output, sample_output, pad_compatible_tokens
 
+    def _beam_search_sample_forward(self,
+                        adjacent_matrix,
+                        ori_input_seq,
+                        input_length,
+                        copy_length,
+                        ):
+        batch_size = ori_input_seq.shape[0]
+        p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, ori_input_seq, copy_length)
+        p1 = torch.squeeze(torch.topk(F.log_softmax(p1_o, dim=-1), k=1, dim=-1)[1], dim=-1)
+        p2 = torch.squeeze(torch.topk(F.log_softmax(p2_o, dim=-1), k=1, dim=-1)[1], dim=-1)
+        slice_state = self.slice_encoder(p1, p2, input_seq) \
+            .permute(1, 0, 2) \
+            .contiguous() \
+            .view(batch_size, self.layer_number, -1) \
+            .permute(1, 0, 2) \
+            .contiguous()
+        encoder_mask = create_sequence_length_mask(input_length, )
+
+        decoder_output_list, _, _ = self.beam_dynamic_decoder.decoder(encoder_output=input_seq, endocer_hidden=slice_state, encoder_mask=encoder_mask,
+                                     copy_length=copy_length, ori_input_seq=ori_input_seq, input_length=input_length)
+        is_copy_list, copy_output_list, sample_output_list, compatible_tokens_list = list(zip(*decoder_output_list))
+
+        is_copy = torch.cat(is_copy_list, dim=2)
+        copy_output = torch.cat(copy_output_list, dim=2)
+        # padded_sample_output_list = pad_last_dim_of_tensor_list(sample_output_list, fill_value=0)
+        padded_sample_output_list = sample_output_list
+        sample_output = torch.cat(padded_sample_output_list, dim=2)
+        # padded_compatible_tokens_list = pad_last_dim_of_tensor_list(compatible_tokens_list, fill_value=0)
+        padded_compatible_tokens_list = compatible_tokens_list
+        pad_compatible_tokens = torch.cat(padded_compatible_tokens_list, dim=2)
+
+        # get beam 0 result
+        is_copy = is_copy[:, 0]
+        copy_output = copy_output[:, 0]
+        sample_output = sample_output[:, 0]
+        pad_compatible_tokens = pad_compatible_tokens[:, 0]
+        return p1_o, p2_o, is_copy, copy_output, sample_output, pad_compatible_tokens
+
     def create_one_step_token_masks(self, ori_input_seq, input_length, continue_mask):
         if self.mask_type == 'static':
             if not hasattr(self, 'compatible_tokens'):
@@ -379,7 +423,8 @@ class EncoderSampleModel(nn.Module):
 
     def create_next_output_input(self, one_step_decoder_output, ori_input_seq=None, **kwargs):
         is_copy, copy_output, sample_output, compatible_tokens = one_step_decoder_output
-        is_copy = is_copy > 0.5
+        # is_copy = is_copy > 0.5
+        is_copy = torch.sigmoid(is_copy) > 0.5
         copy_output_id = torch.squeeze(torch.topk(F.log_softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
         sample_output_id = torch.topk(F.log_softmax(sample_output, dim=-1), dim=-1, k=1)[1]
         sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
@@ -388,6 +433,39 @@ class EncoderSampleModel(nn.Module):
         copy_ids = torch.gather(input_seq, index=copy_output_id, dim=-1)
         sample_output_ids = torch.where(is_copy, copy_ids, sample_output)
         return sample_output_ids
+
+    def beam_create_next_output_input(self, one_step_decoder_output, beam_size, continue_mask=None, ori_input_seq=None, **kwargs):
+        is_copy, copy_output, sample_output, compatible_tokens = one_step_decoder_output
+        is_copy = torch.sigmoid(is_copy)
+        # do not beam search on is_copy
+        is_copy_probs = torch.where(is_copy > 0.5, is_copy, 1.0 - is_copy)
+        is_copy_probs = torch.unsqueeze(torch.log(is_copy_probs), dim=1).expand(-1, beam_size, *[-1 for _ in range(len(is_copy.shape)-1)])
+        is_copy = is_copy > 0.5
+        is_copy_res = torch.unsqueeze(is_copy, dim=1).expand(-1, beam_size, *[-1 for _ in range(len(is_copy.shape)-1)])
+
+        # copy_ids: [batch, sample_seq, beam]
+        copy_probs, copy_ids = torch.topk(F.log_softmax(copy_output, dim=-1), dim=-1, k=beam_size)
+        copy_ids = torch.gather(torch.unsqueeze(ori_input_seq, dim=1), index=copy_ids, dim=-1)
+        sample_output_probs, sample_output_id = torch.topk(F.log_softmax(sample_output, dim=-1),
+                                                           dim=-1, k=beam_size)
+        sample_output = torch.gather(compatible_tokens, dim=-1, index=sample_output_id)
+
+        # it is a simple way to calculate beam when seq=1, if seq >1, error.
+        copy_probs = copy_probs.permute(0, 2, 1)
+        copy_ids = copy_ids.permute(0, 2, 1)
+        sample_output_probs = sample_output_probs.permute(0, 2, 1)
+        sample_output = sample_output.permute(0, 2, 1)
+
+        copy_total_probs = is_copy_probs + copy_probs
+        sample_total_probs = is_copy_probs + sample_output_probs
+        total_probs = torch.where(is_copy_res, copy_total_probs, sample_total_probs)
+
+        total_probs = torch.where(continue_mask.view(total_probs.shape[0], *[1 for _ in range(len(total_probs.shape)-1)]),
+                                  total_probs, torch.zeros_like(total_probs))
+
+        sample_output_ids = torch.where(is_copy_res, copy_ids, sample_output)
+        beam_compatible_tokens = torch.unsqueeze(compatible_tokens, dim=1).expand(-1, beam_size, *[-1 for _ in range(len(compatible_tokens.shape)-1)])
+        return sample_output_ids, total_probs, (is_copy_res, copy_ids, sample_output, beam_compatible_tokens)
 
     def forward(self,
                 adjacent_matrix,
@@ -400,8 +478,14 @@ class EncoderSampleModel(nn.Module):
                 is_copy_target=None,
                 compatible_tokens=None,
                 compatible_tokens_length=None,
-                do_sample=False
+                do_sample=False,
+                do_beam_search=False,
                 ):
+        if do_beam_search:
+            return self._beam_search_sample_forward(adjacent_matrix,
+                                        input_seq,
+                                        input_length,
+                                        copy_length)
         if do_sample:
             return self._sample_forward(adjacent_matrix,
                                         input_seq,
@@ -547,8 +631,10 @@ def expand_output_and_target_fn(ignore_token):
 
 
 def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id):
-    def create_multi_step_next_input_batch(input_data, model_input, model_output, continue_list):
-        output_record_list = create_records_all_output(model_input=model_input, model_output=model_output, do_sample=True)
+    def create_multi_step_next_input_batch(input_data, model_input, model_output, continue_list, direct_output=False):
+        # output_record_list = create_records_all_output(model_input=model_input, model_output=model_output, do_sample=True)
+        output_record_list = create_records_all_output_for_beam(model_input=model_input, model_output=model_output,
+                                                                do_sample=True, direct_output=direct_output)
         p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = output_record_list
 
         sample_output_ids_list = sample_output_ids.tolist()
@@ -589,7 +675,8 @@ def create_records_all_output(model_input, model_output, do_sample=False):
         compatible_tokens = model_input[8]
     p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
     p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
-    is_copy = torch.squeeze(is_copy, dim=-1) > 0.5
+    is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
+    # is_copy = torch.squeeze(is_copy, dim=-1) > 0.5
     copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
     sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
     sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
@@ -598,6 +685,26 @@ def create_records_all_output(model_input, model_output, do_sample=False):
     copy_ids = torch.gather(input_seq, index=copy_output_id, dim=-1)
     sample_output_ids = torch.where(is_copy, copy_ids, sample_output)
     return p1, p2, is_copy, copy_ids, sample_output, sample_output_ids
+
+
+def create_records_all_output_for_beam(model_input, model_output, do_sample=False, direct_output=False):
+    p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens = model_output
+    if do_sample:
+        compatible_tokens = output_compatible_tokens
+    else:
+        compatible_tokens = model_input[8]
+    p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
+    p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
+    if not direct_output:
+        is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
+        copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
+        sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
+        sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
+
+        input_seq = model_input[1]
+        copy_output = torch.gather(input_seq, index=copy_output_id, dim=-1)
+    sample_output_ids = torch.where(is_copy, copy_output, sample_output)
+    return p1, p2, is_copy, copy_output, sample_output, sample_output_ids
 
 
 def multi_step_print_output_records_fn(inner_end_id):

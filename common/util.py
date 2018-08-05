@@ -719,9 +719,9 @@ def compile_syntax_c_code_by_gcc(code, file_path):
     return False
 
 
-def compile_c_code_by_gcc(code, file_path):
+def compile_c_code_by_gcc(code, file_path, target_file_path='main.out'):
     write_code_to_file(code, file_path)
-    res = os.system('gcc -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(file_path))
+    res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
     # res = os.system('gcc -pedantic-errors -std=gnu99 {}'.format(file_path))
     if res == 0:
         return True
@@ -1051,7 +1051,7 @@ def get_position(l, t):
     return -1
 
 
-def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path=''):
+def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path='', target_file_path='main.out'):
     cur_continue = []
     cur_result_list = []
     for code_id, con, includes, res in zip(final_output, continue_list, includes_list, result_list):
@@ -1063,7 +1063,7 @@ def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, 
         code = ' '.join(code_list)
         for inc in includes:
             code = inc + '\n' + code
-        res = compile_c_code_by_gcc(code, file_path=file_path)
+        res = compile_c_code_by_gcc(code, file_path=file_path, target_file_path=target_file_path)
         cur_result_list += [res]
         c = not res
         cur_continue += [c]

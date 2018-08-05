@@ -1,4 +1,6 @@
 import os
+import random
+
 import torch
 
 from torch import nn, optim
@@ -174,7 +176,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
              do_sample=False, print_output=False, create_output_ids_fn=None, evaluate_obj_list=[],
              expand_output_and_target_fn=None, max_step_times=0, vocabulary=None, file_path='',
                         create_multi_step_next_input_batch_fn=None, extract_includes_fn=lambda x: x['includes'],
-                        print_output_fn=None):
+                        print_output_fn=None, do_beam_search=False, target_file_path='main.out'):
     total_loss = to_cuda(torch.Tensor([0]))
     total_batch = to_cuda(torch.Tensor([0]))
     steps = 0
@@ -200,17 +202,19 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                 for i in range(max_step_times):
                     model_input = parse_input_batch_data_fn(input_data, do_sample=True)
 
-                    model_output = model.forward(*model_input, do_sample=True)
+                    model_output = model.forward(*model_input, do_sample=True, do_beam_search=do_beam_search)
 
                     input_data, final_output, output_records = create_multi_step_next_input_batch_fn(input_data,
                                                                                                      model_input,
                                                                                                      model_output,
-                                                                                                     continue_list)
+                                                                                                     continue_list,
+                                                                                                     do_beam_search)
                     final_output_list += [final_output]
                     output_records_list += [output_records]
 
                     continue_list, result_list = compile_code_ids_list(final_output, continue_list, result_list, vocabulary=vocabulary,
-                                                          includes_list=extract_includes_fn(input_data), file_path=file_path)
+                                                          includes_list=extract_includes_fn(input_data), file_path=file_path,
+                                                                       target_file_path=target_file_path)
                     result_records_list += [result_list]
                     if sum(continue_list) == 0:
                         break
@@ -362,7 +366,8 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        do_sample_and_save=False, db_path=None, table_basename=None, add_data_record_fn=None,
                        max_step_times=1, compile_file_path=None, do_multi_step_sample_evaluate=False,
                        create_multi_step_next_input_batch_fn=None, extract_includes_fn=None,
-                       multi_step_sample_evaluator=[], vocabulary=None):
+                       multi_step_sample_evaluator=[], vocabulary=None,
+                       do_beam_search=False, target_file_path='main.out'):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -460,7 +465,9 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                              vocabulary=vocabulary, file_path=compile_file_path,
                                                                              max_step_times=max_step_times,
                                                                              create_multi_step_next_input_batch_fn = create_multi_step_next_input_batch_fn,
-                                                                             print_output_fn=print_output_fn)
+                                                                             print_output_fn=print_output_fn,
+                                                                             do_beam_search=do_beam_search,
+                                                                             target_file_path=target_file_path)
             print('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             info('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             for evaluator in multi_step_test_evalutor:
@@ -576,6 +583,10 @@ if __name__ == '__main__':
     import config
     import argparse
 
+    torch.manual_seed(100)
+    torch.cuda.manual_seed_all(100)
+    random.seed(100)
+
     def boolean_string(s):
         if s not in {'False', 'True'}:
             raise ValueError('Not a valid boolean string')
@@ -633,9 +644,12 @@ if __name__ == '__main__':
     max_step_times = p_config['max_step_times']
     create_multi_step_next_input_batch_fn = p_config['create_multi_step_next_input_batch_fn']
     compile_file_path = p_config['compile_file_path']
+    target_file_path = p_config['target_file_path']
     extract_includes_fn = p_config['extract_includes_fn']
     print_output = p_config['print_output']
     print_output_fn = p_config['print_output_fn']
+
+    do_beam_search = p_config.get('do_beam_search', False)
 
     model_path = os.path.join(save_root_path, p_config['load_model_name'])
     model = get_model(
@@ -669,7 +683,8 @@ if __name__ == '__main__':
                        do_sample_and_save=do_sample_and_save, add_data_record_fn=add_data_record_fn, db_path=db_path,
                        table_basename=table_basename, vocabulary=vocabulary,
                        create_multi_step_next_input_batch_fn=create_multi_step_next_input_batch_fn,
-                       extract_includes_fn=extract_includes_fn)
+                       extract_includes_fn=extract_includes_fn,
+                       do_beam_search=do_beam_search, target_file_path=target_file_path)
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)

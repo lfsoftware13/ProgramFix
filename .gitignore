@@ -4,6 +4,8 @@ data/
 config.py
 /trained_model/
 log/
+yacctab.py
+lextab.py
 
 
 # Byte-compiled / optimized / DLL files

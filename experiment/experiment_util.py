@@ -382,7 +382,8 @@ def load_deepfix_error_data_for_iterate():
 
     df = df.loc[df_data.index.values]
 
-    deepfix_dict = {'error_token_id_list': df_data, 'includes': df['includes'], 'distance': df['errorcount']}
+    deepfix_dict = {'error_token_id_list': df_data, 'includes': df['includes'], 'distance': df['errorcount'],
+                    'error_token_name_list': df_data}
     return deepfix_dict
 
 
