@@ -6,6 +6,7 @@ config.py
 log/
 yacctab.py
 lextab.py
+.exe
 
 
 # Byte-compiled / optimized / DLL files
