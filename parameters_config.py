@@ -191,7 +191,7 @@ def encoder_sample_config1(is_debug):
     tokenize_fn = tokenize_by_clex_fn()
     transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
 
-    batch_size = 10
+    batch_size = 6
     epoches = 80
     ignore_id = -1
     max_length = 500
@@ -233,7 +233,8 @@ def encoder_sample_config1(is_debug):
     return {
         'name': 'encoder_sample_dropout',
         'save_name': 'encoder_sample_dropout.pkl',
-        'load_model_name': 'encoder_sample_dropout_no_overfitting.pkl',
+        'load_model_name': 'rl_solver_encoder_sample_dropout.pkl',
+        # 'load_model_name': 'encoder_sample_dropout_no_overfitting.pkl',
         'logger_file_path': 'encoder_sample_dropout.log',
 
         'model_fn': EncoderSampleModel,
@@ -317,7 +318,7 @@ def encoder_sample_config2(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    epoch_ratio = 0.35
+    epoch_ratio = 1.0
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -354,10 +355,10 @@ def encoder_sample_config2(is_debug):
     from model.encoder_sample_model import create_multi_step_next_input_batch_fn
     from model.encoder_sample_model import multi_step_print_output_records_fn
     return {
-        'name': 'encoder_sample_config2',
-        'save_name': 'encoder_sample_config2.pkl',
-        'load_model_name': 'encoder_sample_config2.pkl',
-        'logger_file_path': 'encoder_sample_config2.log',
+        'name': 'graph_encoder_sample_config2',
+        'save_name': 'graph_encoder_sample_config2.pkl',
+        'load_model_name': 'graph_encoder_sample_config2.pkl',
+        'logger_file_path': 'graph_encoder_sample_config2.log',
 
         'model_fn': EncoderSampleModel,
         'model_dict':
@@ -374,9 +375,12 @@ def encoder_sample_config2(is_debug):
                                                    'input_dropout_p': 0.2, 'dropout_p': 0.2,
                                                    'n_layers': 1, 'bidirectional': True, 'rnn_cell': 'gru',
                                                    'variable_lengths': False, 'embedding': None,
-                                                   'update_embedding': True},
+                                                   'update_embedding': True, },
                                  "graph_type": "ggnn",
-                                 "graph_itr": 3},
+                                 "graph_itr": 3,
+                                 "dropout_p": 0.2,
+                                 "mask_ast_node_in_rnn": False
+                                 },
              'graph_embedding': 'mixed',
              'pointer_type': 'query',
              'rnn_type': 'gru',

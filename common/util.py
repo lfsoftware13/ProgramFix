@@ -721,8 +721,8 @@ def compile_syntax_c_code_by_gcc(code, file_path):
 
 def compile_c_code_by_gcc(code, file_path, target_file_path='main.out'):
     write_code_to_file(code, file_path)
-    res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
-    # res = os.system('gcc -pedantic-errors -std=gnu99 {}'.format(file_path))
+    # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
+    res = os.system('gcc -pedantic-errors -std=gnu99 {} >nul 2>nul'.format(file_path))
     if res == 0:
         return True
     return False

@@ -46,21 +46,24 @@ class SliceEncoder(nn.Module):
         if not inner:
             self.transform = nn.Linear(2*hidden_size, hidden_size)
 
-    def forward(self, p1, p2, seq):
+    def forward(self, p1, p2, seq, copy_length):
         """
         :param p1: The slice begin position, shape [batch, ]
         :param p2: The slice end position, shape [batch, ]
         :param seq: The sequence shape [batch, seq, dim]
+        :param copy_length: The copy_length shape [batch,]
         :return: The encoded slice vector, shape [batch, ]
         """
         seq = torch.unbind(seq, dim=0)
+        copy_length = torch.unbind(copy_length, dim=0)
         if self.inner:
             seq = [s[a:b+1] for a, b, s in zip(p1, p2, seq)]
             return self._encode(seq)
         else:
             seq_before = [s[:a+1] for a, s in zip(p1, seq)]
             before_encoder = self._encode(seq_before)
-            seq_after = [s[a:] for a, s in zip(p2, seq)]
+            seq_after = [s[a:e] for a, s, e in zip(p2, seq, copy_length)]
+            # seq_after = [s[a:] for a, s in zip(p2, seq)]
             after_encoder = self._encode(seq_after)
             encoder = torch.cat((before_encoder, after_encoder), dim=-1)
             return self.transform(encoder)
@@ -94,7 +97,7 @@ class PointerNetwork(nn.Module):
         x = F.tanh(x)
         x = torch.bmm(x, self.query_vector.expand(batch_size, -1, -1))
         x = x.squeeze(-1)
-        if mask is None:
+        if mask is not None:
             x.data.masked_fill_(~mask, -float('inf'))
         return x
 
@@ -106,7 +109,7 @@ class RNNGraphWrapper(nn.Module):
         self.bi = 2 if parameter['bidirectional'] else 1
         self.transform_size = nn.Linear(self.bi * hidden_size, hidden_size)
 
-    def forward(self, x, adj):
+    def forward(self, x, adj, copy_length):
         o, _ = self.encoder(x)
         o = self.transform_size(o)
         return o
@@ -118,17 +121,39 @@ class MixedRNNGraphWrapper(nn.Module):
                  rnn_parameter,
                  graph_type,
                  graph_itr,
+                 dropout_p=0,
+                 mask_ast_node_in_rnn=False,
                  ):
         super().__init__()
         self.rnn = nn.ModuleList([RNNGraphWrapper(hidden_size, rnn_parameter) for _ in range(graph_itr)])
         self.graph_itr = graph_itr
+        self.dropout = nn.Dropout(dropout_p)
+        self.mask_ast_node_in_rnn = mask_ast_node_in_rnn
+        self.inner_graph_itr = 1
         if graph_type == 'ggnn':
             self.graph = GGNNLayer(hidden_size)
 
-    def forward(self, x, adj):
-        for i in range(self.graph_itr):
-            x = x + self.rnn[i](x, adj)
-            x = x + self.graph(x, adj)
+    def forward(self, x, adj, copy_length):
+        if self.mask_ast_node_in_rnn:
+            copy_length_mask = create_sequence_length_mask(copy_length, x.shape[1]).unsqueeze(-1)
+            zero_fill = torch.zeros_like(x)
+            for i in range(self.graph_itr):
+                tx = torch.where(copy_length_mask, x, zero_fill)
+                tx = tx + self.rnn[i](tx, adj, copy_length)
+                x = torch.where(copy_length_mask, tx, x)
+                x = self.dropout(x)
+                # for _ in range(self.inner_graph_itr):
+                x = x + self.graph(x, adj)
+                if i < self.graph_itr - 1:
+                    # pass
+                    x = self.dropout(x)
+        else:
+            for i in range(self.graph_itr):
+                x = x + self.rnn[i](x, adj, copy_length)
+                x = self.dropout(x)
+                x = x + self.graph(x, adj)
+                if i < self.graph_itr - 1:
+                    x = self.dropout(x)
         return x
 
 
@@ -171,18 +196,18 @@ class GraphEncoder(nn.Module):
                 ):
         input_seq = self.embedding(input_seq)
         input_seq = self.size_transform(input_seq)
-        input_seq = self.graph(input_seq, adjacent_matrix)
+        input_seq = self.graph(input_seq, adjacent_matrix, copy_length)
         batch_size = input_seq.shape[0]
         pointer_mask = torch_util.create_sequence_length_mask(copy_length, max_len=input_seq.shape[1])
         if self.pointer_type == 'itr':
             input_seq0 = input_seq
-            input_seq1 = self.graph(input_seq)
-            input_seq2 = self.graph(input_seq1)
+            input_seq1 = self.graph(input_seq, adjacent_matrix, copy_length)
+            input_seq2 = self.graph(input_seq1, adjacent_matrix, copy_length)
             p1 = self.pointer_transform(torch.cat((input_seq0, input_seq1), dim=-1), ).squeeze(-1)
             p1.data.masked_fill_(~pointer_mask, -float("inf"))
             p2 = self.pointer_transform(torch.cat((input_seq0, input_seq2), dim=-1), ).squeeze(-1)
             p2.data.masked_fill_(~pointer_mask, -float("inf"))
-            input_seq = self.graph(input_seq2)
+            input_seq = self.graph(input_seq2, adjacent_matrix, copy_length)
         elif self.pointer_type == 'query':
             p1 = self.p1_pointer_network(input_seq, query=self.query_tensor, mask=pointer_mask)
             p1_state = torch.sum(F.softmax(p1, dim=-1).unsqueeze(-1) * input_seq, dim=1)
@@ -299,7 +324,7 @@ class EncoderSampleModel(nn.Module):
                        ):
         batch_size = input_seq.shape[0]
         p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, input_seq, copy_length)
-        slice_state = self.slice_encoder(p1_target, p2_target, input_seq)\
+        slice_state = self.slice_encoder(p1_target, p2_target, input_seq, copy_length)\
             .permute(1, 0, 2)\
             .contiguous()\
             .view(batch_size, self.layer_number, -1)\
@@ -327,13 +352,16 @@ class EncoderSampleModel(nn.Module):
         p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, ori_input_seq, copy_length)
         p1 = torch.squeeze(torch.topk(F.log_softmax(p1_o, dim=-1), k=1, dim=-1)[1], dim=-1)
         p2 = torch.squeeze(torch.topk(F.log_softmax(p2_o, dim=-1), k=1, dim=-1)[1], dim=-1)
-        slice_state = self.slice_encoder(p1, p2, input_seq) \
+        slice_state = self.slice_encoder(p1, p2, input_seq, copy_length) \
             .permute(1, 0, 2) \
             .contiguous() \
             .view(batch_size, self.layer_number, -1) \
             .permute(1, 0, 2) \
             .contiguous()
         encoder_mask = create_sequence_length_mask(input_length, )
+
+        self.compatible_tokens = None
+        self.compatible_tokens_length = None
 
         decoder_output_list, _, _ = self.dynamic_decoder.decoder(encoder_output=input_seq, endocer_hidden=slice_state, encoder_mask=encoder_mask,
                                      copy_length=copy_length, ori_input_seq=ori_input_seq, input_length=input_length)
@@ -387,7 +415,7 @@ class EncoderSampleModel(nn.Module):
 
     def create_one_step_token_masks(self, ori_input_seq, input_length, continue_mask):
         if self.mask_type == 'static':
-            if not hasattr(self, 'compatible_tokens'):
+            if not hasattr(self, 'compatible_tokens') or self.compatible_tokens is None:
                 self.compatible_tokens, self.compatible_tokens_length = self.create_static_token_mask(ori_input_seq, input_length)
             return self.compatible_tokens, self.compatible_tokens_length
         return None, None

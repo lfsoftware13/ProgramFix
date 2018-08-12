@@ -2,7 +2,7 @@ from c_parser.buffered_clex import BufferedCLex
 from c_parser.pycparser.pycparser import CParser
 from c_parser.pycparser.pycparser.c_ast import Node, FileAST
 
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 import re
 
 
@@ -40,11 +40,22 @@ class CodeGraph(object):
         self._pos_to_id_dict = self._generate_position_to_id(tokens)
         self._ast_list = ast_list
         self._link_tuple_list = [] # a tuple list (id1, id2, link_name)
+        self._add_same_identifier_link()
         self._graph_ = [t.value for t in tokens]
         self._graph_.append("<Delimiter>")
         self._max_id = len(self._graph_)
         self._name_pattern = re.compile(r'(.+)\[\d+\]')
         self._parse_ast_list(ast_list)
+
+    def _add_same_identifier_link(self):
+        identifier_pos_map = defaultdict(list)
+        for i, token in enumerate(self._tokens):
+            if token.type == 'ID':
+                identifier_pos_map[token.value].append(i)
+        for k, v in identifier_pos_map.items():
+            for i in range(len(v)):
+                for j in range(i+1, len(v)):
+                    self._add_link(v[i], v[j], "same_name_link")
 
     def _parse_ast_list(self, ast_list):
         for t in ast_list:
