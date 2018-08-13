@@ -57,13 +57,25 @@ def load_ast_parser():
     parser = AstParser()
     members = inspect.getmembers(parser)
     pattern = re.compile(r'__.*__')
+    p_pattern = re.compile(r"p_.*")
 
     def patch_fn(f, name, doc):
-        def wrapper(parse_self, *args, **kwargs):
+        def wrapper_(parse_self, *args, **kwargs):
             try:
                 return f(*args, **kwargs)
             except Exception as e:
                 parse_self._sub_parser_raise_exception()
+
+        def wrapper_p(parse_self, p):
+            try:
+                return f(p)
+            except Exception as e:
+                parse_self._sub_parser_raise_exception()
+
+        if p_pattern.match(name):
+            wrapper = wrapper_p
+        else:
+            wrapper = wrapper_
 
         wrapper.__name__ = name
         wrapper.__doc__ = doc
