@@ -14,40 +14,11 @@ class AsrException(Exception):
 
 
 class AstParser(CParser):
-    # def p_offsetof_member_designator(self, p):
-    #     try:
-    #         super().p_offsetof_member_designator(p)
-    #     except Exception as e:
-    #         self._sub_parser_raise_exception()
-    #
-    # def _build_declarations(self, spec, decls, typedef_namespace=False):
-    #     try:
-    #         super()._build_declarations(spec, decls, typedef_namespace=typedef_namespace)
-    #     except Exception as e:
-    #         self._sub_parser_raise_exception()
-    #
-    # def _build_function_definition(self, spec, decl, param_decls, body):
-    #     try:
-    #         super()._build_function_definition(spec, decl, param_decls, body)
-    #     except Exception as e:
-    #         self._sub_parser_raise_exception()
-    #
-    # def p_struct_declaration_1(self, p):
-    #     try:
-    #         super().p_struct_declaration_1(p)
-    #     except Exception as e:
-    #         self._sub_parser_raise_exception()
-    #
-    # def _parse_error(self, msg, coord):
-    #     self._sub_parser_raise_exception()
-    #
-    # def _pop_scope(self):
-    #     if len(self._scope_stack) > 1:
-    #         self._sub_parser_raise_exception()
-    #     self._scope_stack.pop()
-    #
-    # def p_error(self, p):
-    #     self._sub_parser_raise_exception()
+    def parse(self, text, filename='', debuglevel=0):
+        try:
+            return super().parse(text, filename, debuglevel)
+        except Exception as e:
+            self._sub_parser_raise_exception()
 
     def _sub_parser_raise_exception(self):
         raise AsrException([t.value for t in self.cparser.symstack[1:]])
@@ -55,36 +26,38 @@ class AstParser(CParser):
 
 def load_ast_parser():
     parser = AstParser()
-    members = inspect.getmembers(parser)
-    pattern = re.compile(r'__.*__')
-    p_pattern = re.compile(r"p_.*")
-
-    def patch_fn(f, name, doc):
-        def wrapper_(parse_self, *args, **kwargs):
-            try:
-                return f(*args, **kwargs)
-            except Exception as e:
-                parse_self._sub_parser_raise_exception()
-
-        def wrapper_p(parse_self, p):
-            try:
-                return f(p)
-            except Exception as e:
-                parse_self._sub_parser_raise_exception()
-
-        if p_pattern.match(name):
-            wrapper = wrapper_p
-        else:
-            wrapper = wrapper_
-
-        wrapper.__name__ = name
-        wrapper.__doc__ = doc
-        return wrapper
-
-    for k, v in filter(lambda x: pattern.match(x[0]) is None and x[0] != '_sub_parser_raise_exception' and x[0] != 'build',
-                       members):
-        new_method = types.MethodType(patch_fn(v, k, v.__doc__), parser)
-        setattr(parser, k, new_method)
+    # members = inspect.getmembers(parser)
+    # pattern = re.compile(r'__.*__')
+    # p_pattern = re.compile(r"p_.*")
+    #
+    # def patch_fn(f, name, doc):
+    #     def wrapper_(parse_self, *args, **kwargs):
+    #         try:
+    #             return f(*args, **kwargs)
+    #         except Exception as e:
+    #             parse_self._sub_parser_raise_exception()
+    #
+    #     def wrapper_p(parse_self, p):
+    #         try:
+    #             return f(p)
+    #         except Exception as e:
+    #             parse_self._sub_parser_raise_exception()
+    #
+    #     if p_pattern.match(name):
+    #         wrapper = wrapper_p
+    #     else:
+    #         wrapper = wrapper_
+    #
+    #     wrapper.__name__ = name
+    #     wrapper.__doc__ = doc
+    #     return wrapper
+    #
+    # for k, v in filter(lambda x: pattern.match(x[0]) is None and x[0] != '_sub_parser_raise_exception' and x[0] != 'build',
+    #                    members):
+    #     new_method = types.MethodType(patch_fn(v, k, v.__doc__), parser)
+    #     setattr(parser, k, new_method)
+    # for k,v in inspect.getmembers(parser):
+    #     print(k, ":", v, ":", v.__doc__)
     parser.build(lexer=BufferedCLex)
     return parser
 
@@ -214,36 +187,36 @@ def parse_ast_code_graph(token_list):
 
 if __name__ == '__main__':
     # load_ast_parser()
-    code1 = """
-        int add(int a,int b)
-            return a+b;
-        }
-        """
     # code1 = """
-    # long * memarray [ 3 ] ;
-    # long getways ( int x , int m ) {
-    #     int a , b , c ;
-    #     static int sum = 0 ;
-    #     if ( x == 0 ) {
-    #         return 0 ;
-    #         static ;
+    #     int add(int a,int b)
+    #         return a+b;
     #     }
-    #     if ( x > 0 ) {
-    #         a = x / 5 ;
-    #         b = x - a ;
-    #         c = ( x - a ) % 3 printf ( "%d%d%d" , a , b , c ) ;
-    #         return getways ( x - 1 , m ) ;
-    #     }
-    # }
-    #
-    # int main ( ) {
-    #     a = x / 5 ;
-    #     b = x - a ;
-    #     c = ( x - a ) % 3 ;
-    #     printf ( "%d%d%d" , a , b , c ) ;
-    #     return 0 ;
-    # }
-    # """
+    #     """
+    code1 = """
+    long * memarray [ 3 ] ;
+    long getways ( int x , int m ) {
+        int a , b , c ;
+        static int sum = 0 ;
+        if ( x == 0 ) {
+            return 0 ;
+            static ;
+        }
+        if ( x > 0 ) {
+            a = x / 5 ;
+            b = x - a ;
+            c = ( x - a ) % 3 printf ( "%d%d%d" , a , b , c ) ;
+            return getways ( x - 1 , m ) ;
+        }
+    }
+
+    int main ( ) {
+        a = x / 5 ;
+        b = x - a ;
+        c = ( x - a ) % 3 ;
+        printf ( "%d%d%d" , a , b , c ) ;
+        return 0 ;
+    }
+    """
     ast, tokens = ast_parse(code1)
     print(ast)
     print(CodeGraph(tokens, ast))
