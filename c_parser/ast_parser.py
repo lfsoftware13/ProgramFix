@@ -4,7 +4,8 @@ from c_parser.pycparser.pycparser.c_ast import Node, FileAST
 
 from collections import namedtuple, defaultdict
 import re
-
+import types
+import inspect
 
 class AsrException(Exception):
     def __init__(self, p, *args: object, **kwargs: object) -> None:
@@ -13,19 +14,72 @@ class AsrException(Exception):
 
 
 class AstParser(CParser):
-    def _pop_scope(self):
-        if len(self._scope_stack) > 1:
-            raise AsrException([t.value for t in self.cparser.symstack[1:]])
-        self._scope_stack.pop()
+    # def p_offsetof_member_designator(self, p):
+    #     try:
+    #         super().p_offsetof_member_designator(p)
+    #     except Exception as e:
+    #         self._sub_parser_raise_exception()
+    #
+    # def _build_declarations(self, spec, decls, typedef_namespace=False):
+    #     try:
+    #         super()._build_declarations(spec, decls, typedef_namespace=typedef_namespace)
+    #     except Exception as e:
+    #         self._sub_parser_raise_exception()
+    #
+    # def _build_function_definition(self, spec, decl, param_decls, body):
+    #     try:
+    #         super()._build_function_definition(spec, decl, param_decls, body)
+    #     except Exception as e:
+    #         self._sub_parser_raise_exception()
+    #
+    # def p_struct_declaration_1(self, p):
+    #     try:
+    #         super().p_struct_declaration_1(p)
+    #     except Exception as e:
+    #         self._sub_parser_raise_exception()
+    #
+    # def _parse_error(self, msg, coord):
+    #     self._sub_parser_raise_exception()
+    #
+    # def _pop_scope(self):
+    #     if len(self._scope_stack) > 1:
+    #         self._sub_parser_raise_exception()
+    #     self._scope_stack.pop()
+    #
+    # def p_error(self, p):
+    #     self._sub_parser_raise_exception()
 
-    def p_error(self, p):
+    def _sub_parser_raise_exception(self):
         raise AsrException([t.value for t in self.cparser.symstack[1:]])
+
+
+def load_ast_parser():
+    parser = AstParser()
+    members = inspect.getmembers(parser)
+    pattern = re.compile(r'__.*__')
+
+    def patch_fn(f, name, doc):
+        def wrapper(parse_self, *args, **kwargs):
+            try:
+                return f(*args, **kwargs)
+            except Exception as e:
+                parse_self._sub_parser_raise_exception()
+
+        wrapper.__name__ = name
+        wrapper.__doc__ = doc
+        return wrapper
+
+    for k, v in filter(lambda x: pattern.match(x[0]) is None and x[0] != '_sub_parser_raise_exception' and x[0] != 'build',
+                       members):
+        new_method = types.MethodType(patch_fn(v, k, v.__doc__), parser)
+        setattr(parser, k, new_method)
+    parser.build(lexer=BufferedCLex)
+    return parser
 
 
 def ast_parse(code):
     if getattr(ast_parse, "parser", None) is None:
-        ast_parse.parser = AstParser()
-        ast_parse.parser.build(lexer=BufferedCLex)
+        ast_parse.parser = load_ast_parser()
     c_parser = ast_parse.parser
     try:
         ast = c_parser.parse(code)
@@ -147,24 +201,46 @@ def parse_ast_code_graph(token_list):
 
 
 if __name__ == '__main__':
-    # code1 = """
-    #     int add(int a,int b)
-    #         return a+b;
-    #     }
-    #     """
+    # load_ast_parser()
     code1 = """
-    
-long * memarray [ 3 ] ; long getways ( int x , int m ) { int a , b , c ; static int sum = 0 ; if ( x == 0 ) { return 0 ; static ; } if ( x > 0 ) { a = x / 5 ; b = x - a ; c = ( x - a ) % 3 printf ( "%d%d%d" , a , b , c ) ; return getways ( x - 1 , m ) ; } } int main ( ) { a = x / 5 ; b = x - a ; c = ( x - a ) % 3 ; printf ( "%d%d%d" , a , b , c ) ; return 0 ; }
-    """
+        int add(int a,int b)
+            return a+b;
+        }
+        """
+    # code1 = """
+    # long * memarray [ 3 ] ;
+    # long getways ( int x , int m ) {
+    #     int a , b , c ;
+    #     static int sum = 0 ;
+    #     if ( x == 0 ) {
+    #         return 0 ;
+    #         static ;
+    #     }
+    #     if ( x > 0 ) {
+    #         a = x / 5 ;
+    #         b = x - a ;
+    #         c = ( x - a ) % 3 printf ( "%d%d%d" , a , b , c ) ;
+    #         return getways ( x - 1 , m ) ;
+    #     }
+    # }
+    #
+    # int main ( ) {
+    #     a = x / 5 ;
+    #     b = x - a ;
+    #     c = ( x - a ) % 3 ;
+    #     printf ( "%d%d%d" , a , b , c ) ;
+    #     return 0 ;
+    # }
+    # """
     ast, tokens = ast_parse(code1)
     print(ast)
     print(CodeGraph(tokens, ast))
-    code2 = """
-    int add(int a,int b){
-        return a+b;
-    }
-    """
-    ast, tokens = ast_parse(code2)
-    print(ast)
-    print(CodeGraph(tokens, ast))
+    # code2 = """
+    # int add(int a,int b){
+    #     return a+b;
+    # }
+    # """
+    # ast, tokens = ast_parse(code2)
+    # print(ast)
+    # print(CodeGraph(tokens, ast))
 
