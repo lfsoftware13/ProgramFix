@@ -10,6 +10,7 @@ from toolz.sandbox import unzip
 from torch.utils.data import Dataset
 import more_itertools
 
+from c_parser.ast_parser import parse_ast_code_graph
 from common.graph_embedding import GGNNLayer, MultiIterationGraph
 from common import torch_util, util
 from common.logger import info
@@ -164,6 +165,8 @@ class GraphEncoder(nn.Module):
                  graph_parameter={},
                  pointer_type='itr',
                  embedding=None, embedding_size=400,
+                 p2_type='static',
+                 p2_step_length=0
                  ):
         """
         :param hidden_size: The hidden state size in the model
@@ -173,6 +176,8 @@ class GraphEncoder(nn.Module):
         super().__init__()
         self.pointer_type = pointer_type
         self.embedding = embedding
+        self.p2_type = p2_type
+        self.p2_step_length = p2_step_length
         self.size_transform = nn.Linear(embedding_size, hidden_size)
         if self.pointer_type == 'itr':
             self.pointer_transform = nn.Linear(2 * hidden_size, 1)
@@ -198,8 +203,8 @@ class GraphEncoder(nn.Module):
         input_seq = self.size_transform(input_seq)
         input_seq = self.graph(input_seq, adjacent_matrix, copy_length)
         batch_size = input_seq.shape[0]
-        pointer_mask = torch_util.create_sequence_length_mask(copy_length, max_len=input_seq.shape[1])
         if self.pointer_type == 'itr':
+            pointer_mask = torch_util.create_sequence_length_mask(copy_length, max_len=input_seq.shape[1])
             input_seq0 = input_seq
             input_seq1 = self.graph(input_seq, adjacent_matrix, copy_length)
             input_seq2 = self.graph(input_seq1, adjacent_matrix, copy_length)
@@ -209,10 +214,12 @@ class GraphEncoder(nn.Module):
             p2.data.masked_fill_(~pointer_mask, -float("inf"))
             input_seq = self.graph(input_seq2, adjacent_matrix, copy_length)
         elif self.pointer_type == 'query':
-            p1 = self.p1_pointer_network(input_seq, query=self.query_tensor, mask=pointer_mask)
+            p1_pointer_mask = torch_util.create_sequence_length_mask(copy_length-1, max_len=input_seq.shape[1])
+            p2_pointer_mask = torch_util.create_sequence_length_mask(copy_length, max_len=input_seq.shape[1])
+            p1 = self.p1_pointer_network(input_seq, query=self.query_tensor, mask=p1_pointer_mask)
             p1_state = torch.sum(F.softmax(p1, dim=-1).unsqueeze(-1) * input_seq, dim=1)
             p2_query = self.up_data_cell(p1_state, self.query_tensor.unsqueeze(0).expand(batch_size, -1))
-            p2 = self.p2_pointer_network(input_seq, query=torch.unsqueeze(p2_query, dim=1), mask=pointer_mask)
+            p2 = self.p2_pointer_network(input_seq, query=torch.unsqueeze(p2_query, dim=1), mask=p2_pointer_mask)
         else:
             raise ValueError("No point type is:{}".format(self.pointer_type))
 
@@ -265,7 +272,9 @@ class EncoderSampleModel(nn.Module):
                  pad_label=-1,
                  vocabulary=None,
                  mask_type='static',
-                 beam_size=5
+                 beam_size=5,
+                 p2_type='static',
+                 p2_step_length=0,
                  ):
         """
         :param vocabulary_size: The size of token vocabulary
@@ -277,6 +286,10 @@ class EncoderSampleModel(nn.Module):
         :param rnn_type: The rnn type used in the model, option:["lstm", "gru"]
         :param rnn_layer_number: The number of layer in this model
         :param dropout_p: The dropout p in this model
+        :param p2_type: type of p2 position. ['static', 'step']. 'static' means p2 express end position directly.
+        'step' means p2 express the delete token length. True end position = p1 + p2 + 1
+        :param p2_step_length: if p2_type is 'step', p2_step_length means max token length it can delete. if p2_type is
+        'static', p2_step_length no use.
         """
         super().__init__()
         self.max_sample_length = max_sample_length
@@ -287,7 +300,8 @@ class EncoderSampleModel(nn.Module):
         self.embedding = nn.Embedding(vocabulary_size, embedding_size)
         self.graph_encoder = GraphEncoder(hidden_size=hidden_size, graph_embedding=graph_embedding,
                                           pointer_type=pointer_type, graph_parameter=graph_parameter,
-                                          embedding=self.embedding, embedding_size=embedding_size)
+                                          embedding=self.embedding, embedding_size=embedding_size,
+                                          p2_type=p2_type, p2_step_length=p2_step_length)
         self.slice_encoder = SliceEncoder(rnn_type=rnn_type, hidden_size=hidden_size // 2, n_layer=rnn_layer_number,
                                           dropout_p=dropout_p)
         # self.slice_encoder = SliceEncoder(rnn_type=rnn_type, hidden_size=hidden_size, n_layer=rnn_layer_number,
@@ -299,6 +313,8 @@ class EncoderSampleModel(nn.Module):
         self.output = Output(hidden_size, vocabulary_size)
         self.layer_number = rnn_layer_number
         self.hidden_size = hidden_size
+        self.p2_type = p2_type
+        self.p2_step_length = p2_step_length
 
         self.dynamic_decoder = DynamicDecoder(self.inner_start_label, self.inner_end_label, self.pad_label,
                                               self.decoder_one_step, self.create_next_output_input,
@@ -358,7 +374,9 @@ class EncoderSampleModel(nn.Module):
             .view(batch_size, self.layer_number, -1) \
             .permute(1, 0, 2) \
             .contiguous()
-        encoder_mask = create_sequence_length_mask(input_length, )
+        encoder_mask = create_sequence_length_mask(input_length, max_len=ori_input_seq.shape[1])
+        self.compatible_tokens = None
+        self.compatible_tokens_length = None
 
         self.compatible_tokens = None
         self.compatible_tokens_length = None
@@ -438,7 +456,7 @@ class EncoderSampleModel(nn.Module):
                                             encoder_outputs=encoder_output, encoder_mask=~encoder_mask,
                                             teacher_forcing_ratio=0)
         decoder_output = torch.stack(decoder_output, dim=1)
-        copy_mask = create_sequence_length_mask(copy_length)
+        copy_mask = create_sequence_length_mask(copy_length, max_len=decoder_inputs.shape[1])
 
         compatible_tokens, compatible_tokens_length = \
             self.create_one_step_token_masks(ori_input_seq=ori_input_seq, input_length=input_length, continue_mask=continue_mask)
@@ -578,6 +596,10 @@ def create_parse_input_batch_data_fn(use_ast=False):
             adjacent_tuple = torch.LongTensor(adjacent_tuple)
             adjacent_values = torch.ones(adjacent_tuple.shape[1]).long()
             adjacent_size = torch.Size([len(batch_data['input_length']), size, size])
+            info('batch_data input_length: ' + str(batch_data['input_length']))
+            info('size: ' + str(size))
+            info('adjacent_tuple: ' + str(adjacent_tuple.shape))
+            info('adjacent_size: ' + str(adjacent_size))
             adjacent_matrix = to_cuda(
                 torch.sparse.LongTensor(
                     adjacent_tuple,
@@ -658,7 +680,7 @@ def expand_output_and_target_fn(ignore_token):
     return expand_output_and_target
 
 
-def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id):
+def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabulary=None, use_ast=False):
     def create_multi_step_next_input_batch(input_data, model_input, model_output, continue_list, direct_output=False):
         # output_record_list = create_records_all_output(model_input=model_input, model_output=model_output, do_sample=True)
         output_record_list = create_records_all_output_for_beam(model_input=model_input, model_output=model_output,
@@ -676,6 +698,8 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id):
             effect_sample_output_list += [sample]
 
         input_seq = input_data['input_seq']
+        copy_length = input_data['copy_length']
+        input_seq = [inp[:cpy] for inp, cpy in zip(input_seq, copy_length)]
         final_output = []
         for i, one_input in enumerate(input_seq):
             effect_sample = effect_sample_output_list[i]
@@ -691,7 +715,28 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id):
         input_data['input_seq'] = next_input
         input_data['input_length'] = next_input_len
         input_data['copy_length'] = next_input_len
+
+        if use_ast:
+            ast_output = [parse_ast_node(code_ids) for code_ids in final_output]
+            input_seq_name, input_seq, adj, input_length = list(zip(*ast_output))
+            input_data['input_seq_name'] = input_seq_name
+            input_data['input_seq'] = input_seq
+            input_data['adj'] = adj
+            input_data['input_length'] = input_length
         return input_data, final_output, output_record_list
+
+    def parse_ast_node(one_final_output):
+        input_seq_name = [vocabulary.id_to_word(token_id) for token_id in one_final_output]
+        print(' '.join(input_seq_name))
+        code_graph = parse_ast_code_graph(input_seq_name)
+        input_length = code_graph.graph_length + 2
+        in_seq, graph = code_graph.graph
+        # begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+        # end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+        input_seq = [begin_id] + [vocabulary.word_to_id(t) for t in in_seq] + [end_id]
+        adj = [[a + 1, b + 1] for a, b, _ in graph] + [[b + 1, a + 1] for a, b, _ in graph]
+        return input_seq_name, input_seq, adj, input_length
+
     return create_multi_step_next_input_batch
 
 

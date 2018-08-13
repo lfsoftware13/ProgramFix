@@ -1,5 +1,7 @@
 import json
 import random
+
+import pandas as pd
 import torch
 
 from c_parser.pycparser.pycparser.ply.lex import LexToken
@@ -225,8 +227,10 @@ def parse_test_tokens(df, data_type, keyword_vocab, tokenize_fn, add_begin_end_l
         begin_id = keyword_vocab.word_to_id(keyword_vocab.begin_tokens[0])
         end_id = keyword_vocab.word_to_id(keyword_vocab.end_tokens[0])
         add_fn = lambda x: [begin_id] + x + [end_id]
+        add_label_fn = lambda x: [keyword_vocab.begin_tokens[0]] + x + [keyword_vocab.end_tokens[0]]
         df['error_code_word_id'] = df['error_code_word_id'].map(add_fn)
-    return df['error_code_word_id']
+        df['code_words'] = df['code_words'].map(add_label_fn)
+    return df['error_code_word_id'], df['code_words']
 
 
 def parse_error_tokens_and_action_map(df, data_type, keyword_vocab, sort_fn=None, tokenize_fn=None):
@@ -321,9 +325,12 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
     print('after tokenize: ', len(df.index))
 
     df['ac_code_name'] = df['ac_code_obj'].map(create_name_list_by_LexToken)
-    df['action_token_list'] = df['action_character_list'].map(json.loads)
+    if isinstance(df['action_character_list'].iloc[0], str):
+        df['action_token_list'] = df['action_character_list'].map(json.loads)
+    else:
+        df['action_token_list'] = df['action_character_list']
 
-    # sort and filter action list
+# sort and filter action list
     if sort_fn is not None:
         df['action_token_list'] = df['action_token_list'].map(sort_fn)
     print('before filter action: {}'.format(len(df['action_token_list'])))
@@ -346,8 +353,10 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
     pos_res = df['action_part_list'].map(
         extract_action_part_start_pos_fn(action_bias_map=action_bias_map))
     ac_pos_list, error_pos_list = list(zip(*pos_res))
-    df['ac_pos_list'] = ac_pos_list
-    df['error_pos_list'] = error_pos_list
+    df['ac_pos_list'] = list(ac_pos_list)
+    # df['ac_pos_list'] = pd.Series(ac_pos_list)
+    df['error_pos_list'] = list(error_pos_list)
+    # df['error_pos_list'] = pd.Series(error_pos_list)
     print('after extract_action_part_start_pos_fn : {}'.format(len(df)))
 
     # create input code and sample code according to action part and ac pos and error pos
@@ -362,15 +371,15 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
     # convert sample code to id
     sample_res = df['sample_ac_code_list'].map(create_token_ids_by_name_fn(keyword_voc=keyword_vocab))
     sample_ac_id_list, sample_ac_len_list = list(zip(*sample_res))
-    df['sample_ac_id_list'] = sample_ac_id_list
-    df['sample_ac_len_list'] = sample_ac_len_list
+    df['sample_ac_id_list'] = list(sample_ac_id_list)
+    df['sample_ac_len_list'] = list(sample_ac_len_list)
     df = df[df['sample_ac_id_list'].map(lambda x: x is not None)]
     print('after sample_ac_id_list : {}'.format(len(df)))
 
     sample_res = df['sample_error_code_list'].map(create_token_ids_by_name_fn(keyword_voc=keyword_vocab))
     sample_error_id_list, sample_error_len_list = list(zip(*sample_res))
-    df['sample_error_id_list'] = sample_error_id_list
-    df['sample_error_len_list'] = sample_error_len_list
+    df['sample_error_id_list'] = list(sample_error_id_list)
+    df['sample_error_len_list'] = list(sample_error_len_list)
     df = df[df['sample_error_id_list'].map(lambda x: x is not None)]
     print('after sample_error_id_list : {}'.format(len(df)))
 
@@ -382,9 +391,18 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
     df = df.apply(create_sample_is_copy, raw=True, axis=1, keyword_ids=keyword_ids)
     print('after create_sample_is_copy : {}'.format(len(df)))
 
+    df = df.apply(create_target_ac_token_id_list, raw=True, axis=1)
+
     return df['token_id_list'], df['sample_error_id_list'], df['sample_ac_id_list'], df['ac_pos_list'], \
            df['error_pos_list'], df['ac_code_id_with_labels'], df['is_copy_list'], df['copy_pos_list'], \
-           df['sample_mask_list'], df['token_name_list']
+           df['sample_mask_list'], df['token_name_list'], df['target_ac_token_id_list']
+
+
+def create_target_ac_token_id_list(one):
+    target_ac_id_list = one['token_id_list'][1:]
+    target_ac_id_list += [one['ac_code_id_with_labels']]
+    one['target_ac_token_id_list'] = target_ac_id_list
+    return one
 
 
 def create_sample_is_copy(one, keyword_ids):

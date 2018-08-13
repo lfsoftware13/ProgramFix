@@ -13,6 +13,11 @@ class AsrException(Exception):
 
 
 class AstParser(CParser):
+    def _pop_scope(self):
+        if len(self._scope_stack) > 1:
+            raise AsrException([t.value for t in self.cparser.symstack[1:]])
+        self._scope_stack.pop()
+
     def p_error(self, p):
         raise AsrException([t.value for t in self.cparser.symstack[1:]])
 
@@ -142,10 +147,14 @@ def parse_ast_code_graph(token_list):
 
 
 if __name__ == '__main__':
+    # code1 = """
+    #     int add(int a,int b)
+    #         return a+b;
+    #     }
+    #     """
     code1 = """
-    int add(int a,int b)
-        return a+b;
-    }
+    
+long * memarray [ 3 ] ; long getways ( int x , int m ) { int a , b , c ; static int sum = 0 ; if ( x == 0 ) { return 0 ; static ; } if ( x > 0 ) { a = x / 5 ; b = x - a ; c = ( x - a ) % 3 printf ( "%d%d%d" , a , b , c ) ; return getways ( x - 1 , m ) ; } } int main ( ) { a = x / 5 ; b = x - a ; c = ( x - a ) % 3 ; printf ( "%d%d%d" , a , b , c ) ; return 0 ; }
     """
     ast, tokens = ast_parse(code1)
     print(ast)

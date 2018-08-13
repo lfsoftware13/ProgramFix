@@ -583,7 +583,7 @@ class SequenceMaskOutput(nn.Module):
         weight = self.embedding(grammar_index).permute(0, 1, 3, 2)
         weight_hidden_size = weight.shape[-2]
         input_seq = input_seq.view(batch_size*seq_len, 1, hidden_size)
-        weight = weight.view(batch_size*seq_len, weight_hidden_size, -1)
+        weight = weight.contiguous().view(batch_size*seq_len, weight_hidden_size, -1)
         o = torch.bmm(input_seq, weight).view(batch_size, seq_len, -1)
         o.data.masked_fill_(~grammar_mask, -float('inf'))
         input_seq_mask = torch.ne(torch.sum(grammar_mask, dim=-1), 0)

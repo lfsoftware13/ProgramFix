@@ -39,7 +39,7 @@ def tokenize_by_clex(code, lexer):
     # print('code: ', code)
     global tokenize_error_count, count
     try:
-        if count % 100 == 0:
+        if count % 1000 == 0:
             print('tokenize: {}'.format(count))
         count += 1
         lexer.reset_lineno()

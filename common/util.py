@@ -25,6 +25,7 @@ import time
 
 from sklearn.utils import shuffle
 from torch.utils.data import Dataset
+import torch.multiprocessing as mp
 
 from common.new_tokenizer import tokenize
 
@@ -711,24 +712,32 @@ def convert_one_token_ids_to_code(token_ids, id_to_word_fn, start, end, unk, inc
 
 
 def compile_syntax_c_code_by_gcc(code, file_path):
+    file_path = add_pid_to_file_path(file_path)
+    # target_file_path = add_pid_to_file_path(target_file_path)
     write_code_to_file(code, file_path)
-    # res = os.system('gcc -fsyntax-only -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(file_path))
-    res = os.system('gcc -c -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(file_path))
+    res = os.system('gcc -fsyntax-only -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(file_path))
+    # res = os.system('gcc -c -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(file_path))
     if res == 0:
         return True
     return False
 
 
 def compile_c_code_by_gcc(code, file_path, target_file_path='main.out'):
+    file_path = add_pid_to_file_path(file_path)
+    target_file_path = add_pid_to_file_path(target_file_path)
     write_code_to_file(code, file_path)
-    # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
-    res = os.system('gcc -pedantic-errors -std=gnu99 {} >nul 2>nul'.format(file_path))
+    # print(code)
+    res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
+    # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {}'.format(target_file_path, file_path))
+    # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {}'.format(target_file_path, file_path))
     if res == 0:
         return True
     return False
 
 
 def compile_c_code_by_gcc_c89(code, file_path):
+    file_path = add_pid_to_file_path(file_path)
+    # target_file_path = add_pid_to_file_path(target_file_path)
     write_code_to_file(code, file_path)
     res = os.system('gcc -pedantic-errors -std=gnu89 {} >/dev/null 2>/dev/null'.format(file_path))
     # res = os.system('gcc -pedantic-errors -std=gnu89 {}'.format(file_path))
@@ -738,6 +747,8 @@ def compile_c_code_by_gcc_c89(code, file_path):
 
 
 def compile_cpp_code_by_gcc(code, file_path):
+    file_path = add_pid_to_file_path(file_path)
+    # target_file_path = add_pid_to_file_path(target_file_path)
     write_code_to_file(code, file_path)
     # res = os.system('g++ -c -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(file_path))
     res = os.system('g++ {} >/dev/null 2>/dev/null'.format(file_path))
@@ -1051,6 +1062,8 @@ def get_position(l, t):
     return -1
 
 
+# num_processes = 6
+# compile_pool = mp.Pool(num_processes)
 def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path='', target_file_path='main.out'):
     cur_continue = []
     cur_result_list = []
@@ -1084,3 +1097,10 @@ def create_effect_keyword_ids_set(keyword_vocab):
     keyword_ids = [keyword_vocab.word_to_id(key) if key in effect_vocabulary_word else None for key in keyword]
     keyword_ids = set(filter(lambda x: x is not None, keyword_ids))
     return keyword_ids
+
+
+def add_pid_to_file_path(file_path):
+    file_name, ext = os.path.splitext(file_path)
+    pid = str(os.getpid())
+    file_path = file_name + '_' + pid + ext
+    return file_path

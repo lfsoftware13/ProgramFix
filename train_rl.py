@@ -1,19 +1,24 @@
 import os
 import random
 
+import numpy as np
 import torch
 
 from torch import nn, optim
 from tqdm import tqdm
+import pandas as pd
 
 from common import torch_util, problem_util, util
 from common.evaluate_util import CompileResultEvaluate
 from common.logger import init_a_file_logger, info
 from common.problem_util import to_cuda
+from common.reinforcement_generate_util import GenerateEnvironment, create_generate_env, create_generate_agent, \
+    generate_action_between_two_code
 from common.util import data_loader, compile_code_ids_list, add_pid_to_file_path
 import torch.functional as F
 
 from database.database_util import create_table, insert_items
+from experiment.experiment_dataset import CombineDataset
 
 IGNORE_TOKEN = -1
 
@@ -30,8 +35,8 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        # torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
-        torch_util.load_model(m, path)
+        torch_util.load_model(m, path, map_location={'cuda:1': 'cpu'})
+        # torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
         print("create new model")
@@ -186,9 +191,6 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
         o.clear_result()
 
     model.eval()
-
-    file_path = add_pid_to_file_path(file_path)
-    target_file_path = add_pid_to_file_path(target_file_path)
 
     with tqdm(total=len(dataset)) as pbar:
         with torch.no_grad():
@@ -358,8 +360,137 @@ def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch
     return evaluate_obj_list
 
 
-def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dataset, ac_copy_dataset,
-                       learning_rate, epoches, saved_name, train_loss_fn, optimizer, optimizer_dict,
+def train_generate_model(generate_agent, generate_env: GenerateEnvironment, parse_input_batch_data_fn, file_path='',
+                        target_file_path='main.out', save_data_fn=None, max_error_count=5, vocabulary=None,
+                         max_generate_distance=10):
+    total_loss = 0
+    total_batch = 0
+    steps = 0
+
+    compile_evaluator = CompileResultEvaluate()
+    compile_evaluator.clear_result()
+    for o in evaluate_object_list:
+        o.clear_result()
+    generate_agent.train()
+    generate_env.eval()
+    avg_reward = None
+
+    save_data_dict = {'ac_code': [], 'action_character_list': [], 'includes': [],
+                      'error_count': [], 'distance': [], 'id': []}
+
+    # file_path = add_pid_to_file_path(file_path)
+    # target_file_path = add_pid_to_file_path(target_file_path)
+
+    last_100_reward_list = []
+    last_100_reward = 0.0
+
+    for states in generate_env.reset():
+        g_model.zero_grad()
+        original_states = states.copy()
+        for t in range(max_error_count):
+            states_tensor = parse_input_batch_data_fn(states, do_sample=True)
+
+            actions = generate_agent.select_action(states_tensor)
+
+            states, reward_list, done_list, env_info = generate_env.step(actions, states, states_tensor,
+                                                                     file_path=file_path, target_file_path=target_file_path)
+
+            generate_agent.add_step_reward(reward_list)
+
+            # reward_list, done_list, save_list, output_ids = deal_reward_fn(batch_data, states_tensor, actions)
+            not_finish_list = [not d for d in done_list]
+            if sum(not_finish_list) == 0:
+                break
+
+        last_reward = generate_agent.get_rewards_sum()
+        if len(last_100_reward_list) < 100:
+            last_100_reward = (last_100_reward * len(last_100_reward_list) + last_reward)/(len(last_100_reward_list) + 1)
+            last_100_reward_list += [last_reward]
+        else:
+            last_100_reward = last_100_reward + (last_reward - last_100_reward_list[0]) / 100
+            last_100_reward_list = last_100_reward_list[1:] + [last_reward]
+
+        # avg_reward = last_reward if not avg_reward else avg_reward * 0.9 + last_reward * 0.1
+        reward_info = 'step {} last reward: {},  avg reward: {}'.format(steps, last_reward, last_100_reward)
+        # print(reward_info)
+        info(reward_info)
+
+        loss_value = generate_agent.finish_episode()
+        loss_info = 'loss value: {}'.format(loss_value)
+        # print(loss_info)
+        info(loss_info)
+
+        if save_data_fn is not None:
+            save_list = env_info['save_list']
+            ac_action_pos = env_info['ac_action_pos']
+            effect_sample_output_list_length = env_info['effect_sample_output_list_length']
+            for ac_code_ids, error_code_ids, inc, save, prog_id, ac_pos, sample_len in zip(original_states['input_seq'], states['input_seq'],
+                                                         original_states['includes'], save_list, original_states['id'],
+                                                                       ac_action_pos, effect_sample_output_list_length):
+                # if save:
+                ac_code_ids = ac_code_ids[1:-1]
+                error_code_ids = error_code_ids[1:-1]
+
+                do_compile_check = False
+                if do_compile_check:
+                    _, ac_res = compile_code_ids_list([ac_code_ids], [True], [True], vocabulary=vocabulary,
+                                                      includes_list=[inc], file_path=file_path,
+                                                      target_file_path=target_file_path)
+                    ac_res = ac_res[0]
+
+                    _, err_res = compile_code_ids_list([error_code_ids], [True], [False], vocabulary=vocabulary,
+                                                      includes_list=[inc], file_path=file_path,
+                                                      target_file_path=target_file_path)
+                    err_res = err_res[0]
+
+                    if (not ac_res) or err_res:
+                        # continue
+                        pass
+
+                ac_code_list = [vocabulary.id_to_word(c) for c in ac_code_ids]
+                # error_code_list = [vocabulary.id_to_word(c) for c in error_code_ids]
+
+                part_ac_code_list = ac_code_ids[ac_pos[0] + 1: ac_pos[1]]
+                part_err_code_list = error_code_ids[ac_pos[0] + 1: ac_pos[0]+sample_len+1]
+                # dis, action_list = generate_action_between_two_code(error_code_list, ac_code_list,
+                #                                                     max_distance=max_generate_distance,
+                #                                                     get_value=lambda x: x)
+                dis, part_action_list = generate_action_between_two_code(part_err_code_list, part_ac_code_list,
+                                                                    max_distance=max_generate_distance,
+                                                                    get_value=lambda x: x)
+                for a in part_action_list:
+                    a['token_pos'] = a['token_pos'] + ac_pos[0] + 1
+                    a['from_char'] = vocabulary.id_to_word(a['from_char']) if a['from_char'] != '' else ''
+                    a['to_char'] = vocabulary.id_to_word(a['to_char']) if a['to_char'] != '' else ''
+                action_list = part_action_list
+                # if 0 > dis or dis >= max_generate_distance:
+                #     continue
+
+                ac_code = ' '.join(ac_code_list)
+                # err_code = ' '.join(error_code_list)
+                save_data_dict['ac_code'] += [ac_code]
+                if len(action_list) == 0:
+                    from common.action_constants import ActionType
+                    random_delete = random.randint(0, len(ac_code_list)-1)
+                    action_list = [{'act_type': ActionType.DELETE, 'from_char': ac_code_list[random_delete],
+                                    'to_char': '', 'token_pos': random_delete}]
+                save_data_dict['action_character_list'] += [action_list]
+                save_data_dict['includes'] += [inc]
+                save_data_dict['error_count'] += [dis]
+                save_data_dict['distance'] += [dis]
+                save_data_dict['id'] += [prog_id]
+
+        steps += 1
+        total_batch += batch_size
+        total_loss += loss_value
+    final_output = 'epoch average loss: {}, last 100 reward: {}'.format(total_loss/steps, np.mean(last_100_reward_list))
+    print(final_output)
+    info(final_output)
+    return save_data_dict
+
+
+def train_and_evaluate(g_model, s_model, environment_dict, agent_dict, batch_size, train_dataset, valid_dataset, test_dataset, ac_dataset,
+                       learning_rate, epoches, s_saved_name, g_saved_name, train_loss_fn, optimizer, s_optimizer_dict, g_optimizer_dict,
                        parse_input_batch_data_fn, parse_target_batch_data_fn,
                        create_output_ids_fn, evaluate_obj_list,
                        load_previous=False, is_debug=False, epoch_ratio=1.0, clip_norm=1,
@@ -367,10 +498,13 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        addition_train=False, addition_train_remain_frac=1.0, addition_epoch_ratio=0.4,
                        start_epoch=0, ac_copy_train=False, ac_copy_radio=1.0,
                        do_sample_and_save=False, db_path=None, table_basename=None, add_data_record_fn=None,
-                       max_step_times=1, compile_file_path=None, do_multi_step_sample_evaluate=False,
+                       g_max_step_times=1, s_max_step_times=1, compile_file_path=None, do_multi_step_sample_evaluate=False,
                        create_multi_step_next_input_batch_fn=None, extract_includes_fn=None,
                        multi_step_sample_evaluator=[], vocabulary=None,
-                       do_beam_search=False, target_file_path='main.out'):
+                       do_beam_search=False, target_file_path='main.out', random_agent_dict=None,
+                       max_generate_distance=10, save_data_fn=lambda x: x,
+                       load_addition_generate_iterate_solver_train_dataset_fn=None,
+                       do_random_generate=False, generate_step=10):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -384,11 +518,28 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
     sample_valid_correct = 0
     sample_test_correct = 0
 
-    save_path = os.path.join(config.save_model_root, saved_name)
+    s_save_path = os.path.join(config.save_model_root, s_saved_name)
+    g_save_path = os.path.join(config.save_model_root, g_saved_name)
 
-    addition_dataset = None
+    g_optimizer = optimizer(filter(lambda p: p.requires_grad, g_model.parameters()), lr=learning_rate, **g_optimizer_dict)
+    s_optimizer = optimizer(filter(lambda p: p.requires_grad, s_model.parameters()), lr=learning_rate, **s_optimizer_dict)
 
-    optimizer = optimizer(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, **optimizer_dict)
+    if do_random_generate:
+        random_agent = create_generate_agent(g_model, g_optimizer, random_agent_dict)
+        env = create_generate_env(s_model, ac_dataset, environment_dict)
+        generate_data = train_generate_model(generate_agent=random_agent, generate_env=env, parse_input_batch_data_fn=parse_input_batch_data_fn,
+                             file_path=compile_file_path, target_file_path=target_file_path, save_data_fn=save_data_fn,
+                             max_error_count=g_max_step_times, vocabulary=vocabulary, max_generate_distance=max_generate_distance)
+        generate_df = pd.DataFrame(generate_data)
+        if load_addition_generate_iterate_solver_train_dataset_fn is not None:
+            generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df, train_dataset.id_to_program_dict)
+            combine_train_set = CombineDataset(train_dataset, generate_dataset, train_dataset.id_to_program_dict, max_dataset_count=3)
+        else:
+            combine_train_set = CombineDataset(train_dataset, train_dataset, train_dataset.id_to_program_dict, max_dataset_count=3)
+    else:
+        combine_train_set = CombineDataset(train_dataset, train_dataset, train_dataset.id_to_program_dict,
+                                           max_dataset_count=3)
+        pass
 
     if load_previous:
         # valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
@@ -405,7 +556,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
         #     print(evaluator)
 
         if do_sample_and_save:
-            sample_and_save_evalutor = sample_and_save(model=model, dataset=test_dataset, batch_size=batch_size,
+            sample_and_save_evalutor = sample_and_save(model=s_model, dataset=test_dataset, batch_size=batch_size,
                                                        loss_function=train_loss_fn, do_sample=True,
                                                        print_output=print_output,
                                                        parse_input_batch_data_fn=parse_input_batch_data_fn,
@@ -421,7 +572,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                 print(evaluator)
                 info(evaluator)
 
-            sample_and_save_evalutor = sample_and_save(model=model, dataset=valid_dataset, batch_size=batch_size,
+            sample_and_save_evalutor = sample_and_save(model=s_model, dataset=valid_dataset, batch_size=batch_size,
                                                        loss_function=train_loss_fn, do_sample=True,
                                                        print_output=print_output,
                                                        parse_input_batch_data_fn=parse_input_batch_data_fn,
@@ -437,7 +588,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                 print(evaluator)
                 info(evaluator)
 
-            sample_and_save_evalutor = sample_and_save(model=model, dataset=train_dataset, batch_size=batch_size,
+            sample_and_save_evalutor = sample_and_save(model=s_model, dataset=train_dataset, batch_size=batch_size,
                                                        loss_function=train_loss_fn, do_sample=True,
                                                        print_output=print_output,
                                                        parse_input_batch_data_fn=parse_input_batch_data_fn,
@@ -456,17 +607,17 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
             return
 
         if do_multi_step_sample_evaluate:
-            multi_step_test_evalutor, sample_test_loss = multi_step_evaluate(model=model, dataset=test_dataset,
-                                                              batch_size=batch_size, do_sample=True,
-                                                              print_output=print_output,
-                                                              parse_input_batch_data_fn=parse_input_batch_data_fn,
-                                                              parse_target_batch_data_fn=parse_target_batch_data_fn,
-                                                              create_output_ids_fn=create_output_ids_fn,
-                                                              evaluate_obj_list=multi_step_sample_evaluator,
-                                                              expand_output_and_target_fn=expand_output_and_target_fn,
-                                                             extract_includes_fn=extract_includes_fn,
-                                                             vocabulary=vocabulary, file_path=compile_file_path,
-                                                                             max_step_times=max_step_times,
+            multi_step_test_evalutor, sample_test_loss = multi_step_evaluate(model=s_model, dataset=test_dataset,
+                                                                             batch_size=batch_size, do_sample=True,
+                                                                             print_output=print_output,
+                                                                             parse_input_batch_data_fn=parse_input_batch_data_fn,
+                                                                             parse_target_batch_data_fn=parse_target_batch_data_fn,
+                                                                             create_output_ids_fn=create_output_ids_fn,
+                                                                             evaluate_obj_list=multi_step_sample_evaluator,
+                                                                             expand_output_and_target_fn=expand_output_and_target_fn,
+                                                                             extract_includes_fn=extract_includes_fn,
+                                                                             vocabulary=vocabulary, file_path=compile_file_path,
+                                                                             max_step_times=g_max_step_times,
                                                                              create_multi_step_next_input_batch_fn = create_multi_step_next_input_batch_fn,
                                                                              print_output_fn=print_output_fn,
                                                                              do_beam_search=do_beam_search,
@@ -486,7 +637,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
             #                                       parse_target_batch_data_fn=parse_target_batch_data_fn,
             #                                       create_output_ids_fn=create_output_ids_fn,
             #                                       evaluate_obj_list=evaluate_obj_list)
-            sample_test_evalutor, sample_test_loss = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+            sample_test_evalutor, sample_test_loss = evaluate(model=s_model, dataset=test_dataset, batch_size=batch_size,
                                                               loss_function=train_loss_fn, do_sample=True,
                                                               print_output=print_output,
                                                               parse_input_batch_data_fn=parse_input_batch_data_fn,
@@ -509,11 +660,11 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
             sample_valid_loss, sample_test_loss, sample_valid_accuracy, sample_test_accuracy, sample_valid_correct, sample_test_correct)
         print(evaluate_output)
         info(evaluate_output)
-        pass
+
+    agent = create_generate_agent(g_model, g_optimizer, agent_dict)
 
     for epoch in range(start_epoch, start_epoch+epoches):
         print('----------------------- in epoch {} --------------------'.format(epoch))
-        combine_train_set = train_dataset
         if addition_train:
             pass
             # addition_predict_dataset = train_dataset
@@ -537,11 +688,11 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
             # print(info_output)
             # combine_train_set = combine_train_set.combine_dataset(addition_dataset)
 
-        if ac_copy_train:
-            combine_train_set = combine_train_set.combine_dataset(ac_copy_dataset.remain_dataset(frac=ac_copy_radio))
+        # if ac_copy_train:
+        #     combine_train_set = combine_train_set.combine_dataset(ac_copy_dataset.remain_dataset(frac=ac_copy_radio))
 
-        train_evaluator, train_loss = train(model=model, dataset=combine_train_set, batch_size=batch_size,
-                                            loss_function=train_loss_fn, optimizer=optimizer, clip_norm=clip_norm,
+        train_evaluator, train_loss = train(model=s_model, dataset=combine_train_set, batch_size=batch_size,
+                                            loss_function=train_loss_fn, optimizer=s_optimizer, clip_norm=clip_norm,
                                             epoch_ratio=epoch_ratio, parse_input_batch_data_fn=parse_input_batch_data_fn,
                                             parse_target_batch_data_fn=parse_target_batch_data_fn,
                                             create_output_ids_fn=create_output_ids_fn,
@@ -552,7 +703,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
             print(evaluator)
             info(evaluator)
 
-        valid_evaluator, valid_loss = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
+        valid_evaluator, valid_loss = evaluate(model=s_model, dataset=valid_dataset, batch_size=batch_size,
                                                loss_function=train_loss_fn,
                                                parse_input_batch_data_fn=parse_input_batch_data_fn,
                                                parse_target_batch_data_fn=parse_target_batch_data_fn,
@@ -564,7 +715,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
         for evaluator in valid_evaluator:
             print(evaluator)
             info(evaluator)
-        test_evaluator, test_loss = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
+        test_evaluator, test_loss = evaluate(model=s_model, dataset=test_dataset, batch_size=batch_size,
                                              loss_function=train_loss_fn,
                                              parse_input_batch_data_fn=parse_input_batch_data_fn,
                                              parse_target_batch_data_fn=parse_target_batch_data_fn,
@@ -578,7 +729,22 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
             info(evaluator)
 
         if not is_debug:
-            torch_util.save_model(model, save_path+str(epoch))
+            torch_util.save_model(s_model, s_save_path+str(epoch))
+
+        if (epoch+1) % generate_step == 0:
+            env = create_generate_env(s_model, ac_dataset, environment_dict)
+            generate_data = train_generate_model(generate_agent=agent, generate_env=env, parse_input_batch_data_fn=parse_input_batch_data_fn,
+                                 file_path=compile_file_path, target_file_path=target_file_path, save_data_fn=save_data_fn,
+                                 max_error_count=g_max_step_times, vocabulary=vocabulary,
+                                 max_generate_distance=max_generate_distance)
+            generate_df = pd.DataFrame(generate_data)
+            generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df,
+                                                                                      train_dataset.id_to_program_dict)
+            combine_train_set = CombineDataset(combine_train_set, generate_dataset, train_dataset.id_to_program_dict,
+                                               max_dataset_count=3)
+
+            if not is_debug:
+                torch_util.save_model(g_model, g_save_path+str(epoch))
 
 
 if __name__ == '__main__':
@@ -617,7 +783,8 @@ if __name__ == '__main__':
     train_loss_fn = p_config.get("train_loss", nn.CrossEntropyLoss)
     clip_norm = p_config.get("clip_norm", 10)
     optimizer = p_config.get("optimizer", optim.SGD)
-    optimizer_dict = p_config.get("optimizer_dict", dict())
+    s_optimizer_dict = p_config.get("s_optimizer_dict", dict())
+    g_optimizer_dict = p_config.get("g_optimizer_dict", dict())
     epoch_ratio = p_config.get("epoch_ratio", 0.25)
     start_epoch = p_config.get('start_epoch', 0)
     ac_copy_train = p_config.get('ac_copy_train', False)
@@ -633,7 +800,8 @@ if __name__ == '__main__':
     init_a_file_logger(args.output_log)
     print("logger_file_path:{}".format(args.output_log))
     # need_pad = p_config.get("need_pad", False)
-    save_name = p_config['save_name']
+    s_saved_name = p_config['s_saved_name']
+    g_saved_name = p_config['g_saved_name']
     parse_input_batch_data_fn = p_config['parse_input_batch_data_fn']
     parse_target_batch_data_fn = p_config['parse_target_batch_data_fn']
     expand_output_and_target_fn = p_config.get('expand_output_and_target_fn', None)
@@ -644,7 +812,8 @@ if __name__ == '__main__':
     vocabulary = p_config['vocabulary']
 
     do_multi_step_sample_evaluate = p_config['do_multi_step_sample_evaluate']
-    max_step_times = p_config['max_step_times']
+    g_max_step_times = p_config['g_max_step_times']
+    s_max_step_times = p_config['s_max_step_times']
     create_multi_step_next_input_batch_fn = p_config['create_multi_step_next_input_batch_fn']
     compile_file_path = p_config['compile_file_path']
     target_file_path = p_config['target_file_path']
@@ -653,41 +822,65 @@ if __name__ == '__main__':
     print_output_fn = p_config['print_output_fn']
 
     do_beam_search = p_config.get('do_beam_search', False)
+    environment_dict = p_config['environment_dict']
+    agent_dict = p_config['agent_dict']
+    random_agent_dict = p_config['random_agent_dict']
+    max_generate_distance = p_config.get('max_generate_distance', 10)
+    save_data_fn = p_config['save_data_fn']
+    load_addition_generate_iterate_solver_train_dataset_fn = p_config['load_addition_generate_iterate_solver_train_dataset_fn']
+    do_random_generate = p_config['do_random_generate']
+    generate_step = p_config['generate_step']
 
-    model_path = os.path.join(save_root_path, p_config['load_model_name'])
-    model = get_model(
-        p_config['model_fn'],
-        p_config['model_dict'],
-        model_path,
+    load_previous_g_model = p_config.get('load_previous_g_model', False)
+    s_model_path = os.path.join(save_root_path, p_config['s_load_model_name'])
+    g_model_path = os.path.join(save_root_path, p_config['g_load_model_name'])
+    g_model = get_model(
+        p_config['g_model_fn'],
+        p_config['g_model_dict'],
+        g_model_path,
+        load_previous=load_previous_g_model,
+        parallel=problem_util.Parallel,
+        gpu_index=problem_util.GPU_INDEX
+    )
+    s_model = get_model(
+        p_config['s_model_fn'],
+        p_config['s_model_dict'],
+        s_model_path,
         load_previous=load_previous,
         parallel=problem_util.Parallel,
         gpu_index=problem_util.GPU_INDEX
     )
 
-    train_data, val_data, test_data, ac_copy_data = p_config.get("data")
+    train_data, val_data, test_data, _ = p_config.get("data")
+    ac_dataset = p_config.get('ac_data')
     if train_data is not None:
         print("The size of train data: {}".format(len(train_data)))
     if val_data is not None:
         print("The size of val data: {}".format(len(val_data)))
     if test_data is not None:
         print("The size of test data: {}".format(len(test_data)))
-    train_and_evaluate(model=model, batch_size=batch_size, train_dataset=train_data, valid_dataset=val_data, test_dataset=test_data,
-                       ac_copy_dataset=ac_copy_data,
-                       learning_rate=learning_rate, epoches=epoches, saved_name=save_name, train_loss_fn=train_loss_fn,
-                       optimizer=optimizer, optimizer_dict=optimizer_dict,
+    train_and_evaluate(g_model=g_model, s_model=s_model, environment_dict=environment_dict, agent_dict=agent_dict,
+                       random_agent_dict=random_agent_dict, batch_size=batch_size, train_dataset=train_data,
+                       valid_dataset=val_data, test_dataset=test_data,
+                       ac_dataset=ac_dataset,
+                       learning_rate=learning_rate, epoches=epoches, s_saved_name=s_saved_name, g_saved_name=g_saved_name, train_loss_fn=train_loss_fn,
+                       optimizer=optimizer, g_optimizer_dict=g_optimizer_dict, s_optimizer_dict=s_optimizer_dict,
                        parse_input_batch_data_fn=parse_input_batch_data_fn, parse_target_batch_data_fn=parse_target_batch_data_fn,
                        create_output_ids_fn=create_output_ids_fn, evaluate_obj_list=evaluate_object_list,
                        load_previous=load_previous, is_debug=is_debug, epoch_ratio=epoch_ratio, clip_norm=clip_norm, start_epoch=start_epoch,
                        do_sample_evaluate=do_sample_evaluate, print_output=print_output, print_output_fn=print_output_fn,
                        ac_copy_train=ac_copy_train, ac_copy_radio=ac_copy_radio,
                        addition_train=False, addition_train_remain_frac=1.0, addition_epoch_ratio=0.4,
-                       max_step_times=max_step_times, compile_file_path=compile_file_path, do_multi_step_sample_evaluate=do_multi_step_sample_evaluate,
+                       g_max_step_times=g_max_step_times, s_max_step_times=s_max_step_times, compile_file_path=compile_file_path, do_multi_step_sample_evaluate=do_multi_step_sample_evaluate,
                        expand_output_and_target_fn=expand_output_and_target_fn,
                        do_sample_and_save=do_sample_and_save, add_data_record_fn=add_data_record_fn, db_path=db_path,
                        table_basename=table_basename, vocabulary=vocabulary,
                        create_multi_step_next_input_batch_fn=create_multi_step_next_input_batch_fn,
                        extract_includes_fn=extract_includes_fn,
-                       do_beam_search=do_beam_search, target_file_path=target_file_path)
+                       do_beam_search=do_beam_search, target_file_path=target_file_path,
+                       max_generate_distance=max_generate_distance, save_data_fn=save_data_fn,
+                       load_addition_generate_iterate_solver_train_dataset_fn=load_addition_generate_iterate_solver_train_dataset_fn,
+                       do_random_generate=do_random_generate, generate_step=generate_step)
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)
