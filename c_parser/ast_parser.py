@@ -136,8 +136,8 @@ class CodeGraph(object):
         return res
 
     def _get_token_id_by_position(self, coord):
-        # if coord is None:
-        #     return None
+        if coord is None:
+            return None
         key = Coordinate(coord.line, coord.column)
         if key in self._pos_to_id_dict:
             return self._pos_to_id_dict[key]
@@ -192,30 +192,53 @@ if __name__ == '__main__':
     #         return a+b;
     #     }
     #     """
+    # code1 = """
+    # long * memarray [ 3 ] ;
+    # long getways ( int x , int m ) {
+    #     int a , b , c ;
+    #     static int sum = 0 ;
+    #     if ( x == 0 ) {
+    #         return 0 ;
+    #         static ;
+    #     }
+    #     if ( x > 0 ) {
+    #         a = x / 5 ;
+    #         b = x - a ;
+    #         c = ( x - a ) % 3 printf ( "%d%d%d" , a , b , c ) ;
+    #         return getways ( x - 1 , m ) ;
+    #     }
+    # }
+    #
+    # int main ( ) {
+    #     a = x / 5 ;
+    #     b = x - a ;
+    #     c = ( x - a ) % 3 ;
+    #     printf ( "%d%d%d" , a , b , c ) ;
+    #     return 0 ;
+    # }
+    # """
     code1 = """
-    long * memarray [ 3 ] ;
-    long getways ( int x , int m ) {
-        int a , b , c ;
-        static int sum = 0 ;
-        if ( x == 0 ) {
-            return 0 ;
-            static ;
+    int main ( ) 
+    {
+        int output ( int ) include < stdio . h > 
+        int main ( ) 
+        { 
+            int n , k , i ; 
+            scanf ( "%d%d" , & n , & k ) ; 
+            int arr [ n ] , output [ n ] ; 
+            for ( i = 0 ; i < n ; i ++ ) { 
+                scanf ( "%d " , & arr [ i ] ) ; 
+            } 
+            for ( i = 0 ; i < k + 1 ; i ++ ) { 
+                int count [ i ] = 0 ; 
+            } 
+            
+            for ( i = 0 ; i < k + 1 ; i ++ ) { 
+                count [ arr [ i ] ] += 1 ; 
+                printf ( "%d " , count [ i ] ) ; 
+            } 
+            return 0 ; 
         }
-        if ( x > 0 ) {
-            a = x / 5 ;
-            b = x - a ;
-            c = ( x - a ) % 3 printf ( "%d%d%d" , a , b , c ) ;
-            return getways ( x - 1 , m ) ;
-        }
-    }
-
-    int main ( ) {
-        a = x / 5 ;
-        b = x - a ;
-        c = ( x - a ) % 3 ;
-        printf ( "%d%d%d" , a , b , c ) ;
-        return 0 ;
-    }
     """
     ast, tokens = ast_parse(code1)
     print(ast)
