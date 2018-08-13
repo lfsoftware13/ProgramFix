@@ -187,8 +187,8 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
 
     model.eval()
 
-    file_path = add_pid_to_file_path(file_path)
-    target_file_path = add_pid_to_file_path(target_file_path)
+    # file_path = add_pid_to_file_path(file_path)
+    # target_file_path = add_pid_to_file_path(target_file_path)
 
     with tqdm(total=len(dataset)) as pbar:
         with torch.no_grad():
