@@ -5,7 +5,7 @@ from common.evaluate_util import SLKOutputAccuracyAndCorrect, EncoderCopyAccurac
     ErrorPositionAndValueAccuracy
 from common.opt import OpenAIAdam
 from common.pycparser_util import tokenize_by_clex_fn
-from model.encoder_sample_model import create_parse_input_batch_data_fn
+from model.encoder_sample_model import create_parse_input_batch_data_fn, create_records_all_output
 from model.one_pointer_copy_self_attention_seq2seq_model_gammar_mask_refactor import load_sample_save_dataset, \
     create_save_sample_data
 from read_data.load_data_vocabulary import create_common_error_vocabulary, create_deepfix_common_error_vocabulary
@@ -240,10 +240,10 @@ def encoder_sample_config1(is_debug):
     from model.encoder_sample_model import multi_step_print_output_records_fn
     return {
         # 'name': 'encoder_sample_dropout',
-        'name': 'graph_encoder_sample_config2',
+        'name': 'reinforcement_encoder_sample_dropout',
         'save_name': 'encoder_sample_dropout.pkl',
         # 'load_model_name': 'encoder_sample_dropout_no_overfitting.pkl',
-        'load_model_name': 'graph_encoder_sample_config2.pkl',
+        'load_model_name': 'rl_solver_encoder_sample_dropout.pkl',
         'logger_file_path': 'encoder_sample_dropout.log',
 
         'model_fn': EncoderSampleModel,
@@ -328,7 +328,7 @@ def encoder_sample_config2(is_debug):
     tokenize_fn = tokenize_by_clex_fn()
     transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
 
-    batch_size = 16
+    batch_size = 6
     epoches = 80
     ignore_id = -1
     max_length = 500
@@ -466,7 +466,7 @@ def encoder_sample_data_generate1(is_debug):
     max_length = 500
     do_flatten = False
     do_multi_step_sample = False
-    generate_step = 10
+    generate_step = 5
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -521,11 +521,12 @@ def encoder_sample_data_generate1(is_debug):
     from common.reinforcement_generate_util import create_output_from_actions_fn
     from common.reinforcement_generate_util import create_random_sample
     from experiment.experiment_dataset import load_addition_generate_iterate_solver_train_dataset_fn
+    from common.reinforcement_generate_util import all_output_and_target_evaluate_fn
     return {
         'name': 'reinforcement_encoder_sample_dropout',
-        's_saved_name': 'rl_solver_encoder_sample_dropout.pkl',
+        's_saved_name': 'rl_solver_encoder_sample_dropout_multi_step.pkl',
         's_load_model_name': 'encoder_sample_dropout_no_overfitting.pkl',
-        'g_saved_name': 'rl_generator_encoder_sample_dropout.pkl',
+        'g_saved_name': 'rl_generator_encoder_sample_dropout_multi_step.pkl',
         'g_load_model_name': 'rl_generator_encoder_sample_dropout.pkl',
         'load_previous_g_model': False,
         # 'logger_file_path': 'encoder_sample_dropout.log',
@@ -631,18 +632,23 @@ def encoder_sample_data_generate1(is_debug):
                              'preprocess_next_input_for_solver_fn': generate_error_code_from_ac_code_and_action_fn(inner_end_id, begin_id, end_id),
                              'parse_input_batch_data_for_solver_fn': create_parse_input_batch_data_fn(),
                              'solver_create_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id),
+                             'parse_target_batch_data_fn': create_parse_target_batch_data(ignore_token=ignore_id),
+                             'create_records_all_output_fn': create_records_all_output,
+                             'evaluate_output_result_fn': all_output_and_target_evaluate_fn(ignore_token=ignore_id),
                              'vocabulary': vocabulary,
                              'compile_code_ids_fn': compile_code_ids_list,
                              'extract_includes_fn': lambda x: x['includes'],
                              'create_reward_by_compile_fn': create_reward_by_compile,
                              'data_radio': 1.0,
+                             'inner_begin_label': inner_begin_id,
+                             'inner_end_label': inner_end_id,
                              },
 
         'do_sample_evaluate': False,
 
         'do_multi_step_sample_evaluate': do_multi_step_sample,
         'do_beam_search': False,
-        'g_max_step_times': 1,
+        'g_max_step_times': 3,
         's_max_step_times': 3,
         'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id),
         'compile_file_path': '/dev/shm/main.c',

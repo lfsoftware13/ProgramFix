@@ -1,7 +1,7 @@
 import copy
+import itertools
 import math
 import random
-from collections import namedtuple
 
 import numpy as np
 import torch
@@ -9,21 +9,21 @@ import torch.nn.functional as F
 import gym
 from torch.distributions import Categorical
 from tqdm import tqdm
+import torch.multiprocessing as mp
 
+from common.args_util import get_compile_pool
 from common.logger import info
 from common.torch_util import create_sequence_length_mask
-from common.util import data_loader
+from common.util import data_loader, create_effect_keyword_ids_set, PaddedList
 from error_generation.find_closest_group_data.token_level_closest_text import \
     calculate_distance_and_action_between_two_code
+from experiment.experiment_util import convert_action_map_to_old_action
 
 
-SavedAction = namedtuple('SavedAction', ['log_prob'])
-
-
-def generate_action_between_two_code(error_tokens, ac_tokens, max_distance=None, get_value=None):
+def generate_action_between_two_code(error_tokens, ac_tokens, max_distance=None, get_value=lambda x: x):
     distance, action_list = calculate_distance_and_action_between_two_code(error_tokens, ac_tokens,
                                                                       max_distance=max_distance, get_value=get_value)
-    if distance > max_distance:
+    if max_distance is not None and distance > max_distance:
         distance = -1
         action_list = None
     return distance, action_list
@@ -173,8 +173,6 @@ def create_reward_by_compile(result_list, states, actions, continue_list):
     :param actions:
     :return:
     """
-    p1 = actions[0]
-    p2 = actions[1]
 
     new_result_list = []
     for res, con in zip(result_list, continue_list):
@@ -187,6 +185,182 @@ def create_reward_by_compile(result_list, states, actions, continue_list):
         new_result_list += [rew]
     done_list = [False if res else True for res in result_list]
     return new_result_list, done_list
+
+
+def generate_target_by_code_and_actions(ac_code, actions, prog_id, one_includes, keyword_ids, inner_begin_id, inner_end_id):
+    """
+    input argument are all in one records for multi iterate step.
+    create all batch data info from ac code and actions .
+    :param ac_code: ac code id list with start and end label
+    :param actions:
+    :param one_includes:
+    :param keyword_ids:
+    :param inner_begin_id:
+    :param inner_end_id:
+    :return:
+    """
+    CHANGE = 0
+    INSERT = 1
+    DELETE = 2
+    from experiment.experiment_util import action_list_sorted_no_reverse
+    from experiment.parse_xy_util import action_offset_with_begin_and_end
+    from experiment.parse_xy_util import split_actions
+    from experiment.parse_xy_util import extract_action_part_start_pos_fn
+    from experiment.parse_xy_util import create_sample_error_position_with_iterate
+    from common.util import create_effect_keyword_ids_set
+    from experiment.parse_xy_util import create_sample_is_copy
+    from experiment.parse_xy_util import filter_repeat_action_list
+    from experiment.parse_xy_util import create_target_ac_token_id_list
+    action_sort_fn = action_list_sorted_no_reverse
+    actions = action_sort_fn(actions)
+    actions = filter_repeat_action_list(actions)
+    offset_actions = action_offset_with_begin_and_end(actions)
+    # offset_actions = actions
+    action_part_list = split_actions(offset_actions)
+    action_bias_map = {INSERT: 1, DELETE: -1, CHANGE: 0}
+    extract_action_start_pos_fn = extract_action_part_start_pos_fn(action_bias_map=action_bias_map)
+    ac_pos_list, error_pos_list = extract_action_start_pos_fn(action_part_list)
+    one = {'ac_code_name_with_labels': ac_code,
+           'action_part_list': action_part_list,
+           'ac_pos_list': ac_pos_list,
+           'error_pos_list': error_pos_list}
+    one = create_sample_error_position_with_iterate(one)
+
+    token_id_list = one['token_name_list']
+    sample_ac_id_list = one['sample_ac_code_list']
+    sample_error_id_list = one['sample_error_code_list']
+
+    iterate_num = len(token_id_list)
+
+    sample_ac_len_list = [len(l) for l in sample_ac_id_list]
+    sample_error_len_list = [len(l) for l in sample_error_id_list]
+
+    # keyword_ids = create_effect_keyword_ids_set(keyword_vocab)
+
+    create_input_ids_set_fn = lambda x: list(keyword_ids | set(x[1:-1]))
+    sample_mask_list = create_input_ids_set_fn(ac_code)
+
+    one = {'sample_ac_id_list': sample_ac_id_list, 'token_id_list': token_id_list}
+    one = create_sample_is_copy(one, keyword_ids)
+    is_copy_list = one['is_copy_list']
+    copy_pos_list = one['copy_pos_list']
+
+    one = {'token_id_list': token_id_list, 'ac_code_id_with_labels': ac_code}
+    one = create_target_ac_token_id_list(one)
+    target_ac_token_id_list = one['target_ac_token_id_list']
+
+    # create target
+    is_copy_target = [one + [0] for one in is_copy_list]
+    copy_target = [one + [-1] for one in copy_pos_list]
+    sample_target = [one + [inner_end_id] for one in sample_ac_id_list]
+    sample_target = [[t if c == 0 else -1 for c, t in zip(one_is_copy, one_sample)]
+                     for one_is_copy, one_sample in zip(is_copy_target, sample_target)]
+    p1_target = [error_pos[0] for error_pos in error_pos_list]
+    p2_target = [error_pos[1] for error_pos in error_pos_list]
+
+    sample_mask = sorted(sample_mask_list + [inner_end_id])
+    sample_mask_dict = {v: i for i, v in enumerate(sample_mask)}
+    compatible_tokens = [[sample_mask for _ in range(len(one))]
+                         for one in is_copy_target]
+    compatible_tokens_length = [[len(tokens) for tokens in one] for one in compatible_tokens]
+
+    sample_small_target = [[sample_mask_dict[t] if c == 0 else -1 for c, t in zip(one_c, one_t)]
+                           for one_c, one_t in zip(is_copy_target, sample_target)]
+    sample_outputs_length = [len(one) for one in sample_target]
+
+    adjacent_matrix = [0 for _ in range(iterate_num)]
+    input_seq = token_id_list
+    input_length = [len(ids) for ids in input_seq]
+    copy_length = input_length
+    target = [[inner_begin_id] + ac_ids + [inner_end_id] for ac_ids in sample_ac_id_list]
+    includes = [one_includes for _ in range(iterate_num)]
+    id_list = [prog_id for _ in range(iterate_num)]
+
+    sample = {'input_seq': input_seq, 'input_length': input_length, 'is_copy_target': is_copy_target,
+              'copy_target': copy_target, 'copy_length': copy_length, 'sample_target': sample_target,
+              'sample_small_target': sample_small_target, 'sample_outputs_length': sample_outputs_length,
+              'target': target, 'p1_target': p1_target, 'p2_target': p2_target,
+              'compatible_tokens': compatible_tokens, 'compatible_tokens_length': compatible_tokens_length,
+              'adj': adjacent_matrix, 'includes': includes, 'id': id_list,
+              'full_output_target': target_ac_token_id_list}
+
+    return sample
+
+
+def generate_ac_to_error_action_and_create_input_and_target(cur_error_code_ids, ac_code_ids, max_distance, prog_id,
+                                                            one_includes, keyword_ids, inner_begin_id, inner_end_id,
+                                                            is_continue, last_sample):
+    """
+
+    :param cur_error_code_ids:
+    :param ac_code_ids:
+    :param max_distance_list:
+    :param actions:
+    :param prog_id:
+    :param one_includes:
+    :param keyword_ids:
+    :param inner_begin_id:
+    :param inner_end_id:
+    :return:
+    """
+    if not is_continue and last_sample is not None:
+        return last_sample
+    distance, actions = generate_action_between_two_code(cur_error_code_ids[1:-1], ac_code_ids[1:-1],
+                                                         max_distance, get_value=lambda x: x)
+    if len(actions) == 0:
+        from common.action_constants import ActionType
+        random_delete = random.randint(0, len(ac_code_ids) - 2 - 1)
+        actions = [{'act_type': ActionType.DELETE, 'from_char': ac_code_ids[random_delete],
+                        'to_char': '', 'token_pos': random_delete}]
+    actions = convert_action_map_to_old_action(actions)
+    sample = generate_target_by_code_and_actions(ac_code_ids, actions, prog_id, one_includes, keyword_ids, inner_begin_id, inner_end_id)
+    return sample
+
+
+def get_one_step_of_sample(multi_iterate_sample_list):
+    """
+    consist multi_iterate_sample list to multi iterate sample_list
+    [{'input': [iterate_one. iterate_two, ...], 'input_two': ...}, {records_two}, ...] ->
+    [{'input': [records_one, records_two], 'input_two': ...}, {iterate_two}, ...]
+    :param multi_iterate_sample_list:
+    :return:
+    """
+    iterate_time = [len(one_records['input_seq']) for one_records in multi_iterate_sample_list]
+    max_iterate_num = max(iterate_time)
+
+    for i in range(max_iterate_num):
+        input_data = {}
+        for k in multi_iterate_sample_list[0].keys():
+            input_data[k] = [one_records[k][min(i, iterate_num-1)]
+                             for one_records, iterate_num in zip(multi_iterate_sample_list, iterate_time)]
+        yield input_data
+
+
+def all_output_and_target_evaluate_fn(ignore_token):
+    def all_output_and_target_evaluate(model_output, model_target, batch_data):
+        p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = model_output
+        p1_t, p2_t, is_copy_t, copy_target_t, sample_target_t, sample_small_target_t = model_target
+
+        output_mask = torch.ne(is_copy_t, ignore_token)
+
+        result = torch.eq(p1_t, p1)
+        result = result & torch.eq(p2_t, p2)
+
+        # is_copy_ne_count = torch.sum(torch.ne(is_copy, is_copy_t) & output_mask, dim=-1)
+        # result = result & torch.eq(is_copy_ne_count, 0)
+        #
+        # copy_ids_ne_count = torch.sum(torch.ne(copy_ids, copy_target_t) & output_mask, dim=-1)
+        # result = result & torch.eq(copy_ids_ne_count, 0)
+        #
+        # sample_ids_ne_count = torch.sum(torch.ne(sample_output, sample_target_t) & output_mask, dim=-1)
+        # result = result & torch.eq(sample_ids_ne_count, 0)
+
+        target_output = torch.LongTensor(PaddedList(batch_data['target'], fill_value=ignore_token)).to(p1_t.device)
+        sample_ids_ne_count = torch.sum(torch.ne(sample_output_ids, target_output[:, 1:]) & output_mask, dim=-1)
+        result = result & torch.eq(sample_ids_ne_count, 0)
+        return result
+
+    return all_output_and_target_evaluate
 
 
 # def deal_with_reward_fn(s_model, parse_input_batch_data_fn, g_create_next_input_batch_fn, s_create_next_input_batch_fn,
@@ -213,24 +387,35 @@ def create_reward_by_compile(result_list, states, actions, continue_list):
 #     return deal_with_reward
 
 count = 0
+# generate_action_pool = mp.Pool(num_processes)
 class GenerateEnvironment(gym.Env):
     def __init__(self, s_model, dataset, batch_size, preprocess_next_input_for_solver_fn,
                  parse_input_batch_data_for_solver_fn, solver_create_next_input_batch_fn, vocabulary,
-                 compile_code_ids_fn, extract_includes_fn, create_reward_by_compile_fn, data_radio=1.0):
+                 compile_code_ids_fn, extract_includes_fn, create_reward_by_compile_fn, parse_target_batch_data_fn,
+                 create_records_all_output_fn, evaluate_output_result_fn,
+                 data_radio=1.0, inner_begin_label=None, inner_end_label=None):
         self.s_model = s_model
         self.dataset = dataset
         self.batch_size = batch_size
         self.preprocess_next_input_for_solver_fn = preprocess_next_input_for_solver_fn
         self.parse_input_batch_data_for_solver_fn = parse_input_batch_data_for_solver_fn
         self.solver_create_next_input_batch_fn = solver_create_next_input_batch_fn
+        self.create_records_all_output_fn = create_records_all_output_fn
+        self.evaluate_output_result_fn = evaluate_output_result_fn
         self.vocabulary = vocabulary
         self.compile_code_ids_fn = compile_code_ids_fn
         self.extract_includes_fn = extract_includes_fn
         self.data_radio = data_radio
         self.create_reward_by_compile_fn = create_reward_by_compile_fn
+        self.parse_target_batch_data_fn = parse_target_batch_data_fn
 
         self.continue_list = [True for _ in range(batch_size)]
-        self.result_list = [False for _ in range(batch_size)]
+        self.result_list = [True for _ in range(batch_size)]
+        self.ac_batch_data = None
+        self.keyword_ids = create_effect_keyword_ids_set(vocabulary)
+        self.inner_begin_label = inner_begin_label
+        self.inner_end_label = inner_end_label
+
 
     def reset(self):
         with tqdm(total=len(self.dataset) * self.data_radio) as pbar:
@@ -238,28 +423,73 @@ class GenerateEnvironment(gym.Env):
                                           epoch_ratio=self.data_radio):
                 self.continue_list = [True for _ in range(self.batch_size)]
                 self.result_list = [True for _ in range(self.batch_size)]
+                self.last_sample = [None for _ in range(self.batch_size)]
+                self.step_action_list = []
+                self.ac_batch_data = batch_data.copy()
                 yield batch_data
                 pbar.update(self.batch_size)
 
     def step(self, actions, states, states_tensor, file_path, target_file_path):
         with torch.no_grad():
+            # calculate p1 and p2 in code without label
             p1 = (actions[0]-1).tolist()
             p2 = (actions[1]-1).tolist()
             ac_action_pos = list(zip(p1, p2))
+
+            # create error code by generate output
+            # for i in range(len(self.step_action_list)):
             ori_states = states.copy()
             batch_data, output_ids, effect_sample_output_list_length = self.preprocess_next_input_for_solver_fn(states, states_tensor, actions)
             ori_error_data = batch_data.copy()
-            model_input = self.parse_input_batch_data_for_solver_fn(batch_data, do_sample=True)
-            model_output = self.s_model.forward(*model_input, do_sample=True)
-            input_data, final_output, output_records = self.solver_create_next_input_batch_fn(batch_data, model_input, model_output, self.continue_list)
 
-            _, self.result_list = self.compile_code_ids_fn(final_output, self.continue_list, self.result_list,
-                                                 vocabulary=self.vocabulary,
-                                                 includes_list=self.extract_includes_fn(input_data),
-                                                 file_path=file_path,
-                                                 target_file_path=target_file_path)
+            pool = get_compile_pool()
+            batch_size = len(output_ids)
 
-            print_output = True
+            # generate action between ac code and error code
+            max_distance_list = [None for _ in range(batch_size)]
+            cur_error_code_ids = batch_data['input_seq']
+            ac_code_ids = self.ac_batch_data['input_seq']
+            # generate_args = list(zip(cur_error_code_ids, ac_code_ids, max_distance_list))
+            # generate_result_list = list(pool.starmap(generate_action_between_two_code, generate_args))
+            # action_list, distance_list = list(zip(*generate_result_list))
+
+            # ac_code_ids = self.ac_batch_data['input_seq']
+            prog_id_list = self.ac_batch_data['id']
+            includes_list = self.ac_batch_data['includes']
+            keyword_ids_list = [self.keyword_ids for _ in range(batch_size)]
+            inner_begin_label_list = [self.inner_begin_label for _ in range(batch_size)]
+            inner_end_label_list = [self.inner_end_label for _ in range(batch_size)]
+            # generate_target_by_code_and_actions(ac_code_ids, action_list, prog_id_list, includes_list, self.keyword_ids,
+            #                                     self.inner_begin_label, self.inner_end_label)
+
+            generate_args = list(zip(cur_error_code_ids, ac_code_ids, max_distance_list, prog_id_list, includes_list,
+                                     keyword_ids_list, inner_begin_label_list, inner_end_label_list, self.continue_list, self.last_sample))
+            # generate_args = [list(args) for args in generate_args]
+            generate_result_list = list(pool.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
+            # generate_result_list = list(itertools.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
+            self.last_sample = generate_result_list
+            result = torch.ones(batch_size).byte().to(actions[0].device)
+            for one_iterate_sample in get_one_step_of_sample(generate_result_list):
+                model_input = self.parse_input_batch_data_for_solver_fn(one_iterate_sample, do_sample=False)
+                model_output = self.s_model.forward(*model_input, do_sample=False)
+                output_records_list = self.create_records_all_output_fn(model_input, model_output, do_sample=False)
+                model_target = self.parse_target_batch_data_fn(one_iterate_sample)
+                result_list = self.evaluate_output_result_fn(output_records_list, model_target, one_iterate_sample)
+                result = result_list & result
+
+            # generate_action_between_two_code(batch_data, self.ac_batch_data, max_distance=0)
+            # for i in range(len(self.step_action_list)):
+            #     model_input = self.parse_input_batch_data_for_solver_fn(batch_data, do_sample=True)
+            #     model_output = self.s_model.forward(*model_input, do_sample=True)
+            #     input_data, final_output, output_records = self.solver_create_next_input_batch_fn(batch_data, model_input, model_output, self.continue_list)
+            #
+            #     _, self.result_list = self.compile_code_ids_fn(final_output, self.continue_list, self.result_list,
+            #                                          vocabulary=self.vocabulary,
+            #                                          includes_list=self.extract_includes_fn(input_data),
+            #                                          file_path=file_path,
+            #                                          target_file_path=target_file_path)
+
+            print_output = False
             global count
             count += 1
             if print_output and count % 10 == 0:
@@ -286,11 +516,11 @@ class GenerateEnvironment(gym.Env):
                         info('fin_code: '+fin_code)
                     k += 1
 
-
-            reward_list, done_list = self.create_reward_by_compile_fn(self.result_list, states, actions, self.continue_list)
+            reward_list, done_list = self.create_reward_by_compile_fn(result, states, actions, self.continue_list)
             self.continue_list = [not done for done in done_list]
 
             save_list = [reward > 0 for reward in reward_list]
+            # done_list = [False for _ in range(len(reward_list))]
         return ori_error_data, reward_list, done_list, {'save_list': save_list,
                                                         'ac_action_pos': ac_action_pos,
                                                         'effect_sample_output_list_length': effect_sample_output_list_length}

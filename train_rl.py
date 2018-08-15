@@ -1,3 +1,4 @@
+import itertools
 import os
 import random
 
@@ -9,6 +10,7 @@ from tqdm import tqdm
 import pandas as pd
 
 from common import torch_util, problem_util, util
+from common.args_util import get_compile_pool
 from common.evaluate_util import CompileResultEvaluate
 from common.logger import init_a_file_logger, info
 from common.problem_util import to_cuda
@@ -35,7 +37,7 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        torch_util.load_model(m, path, map_location={'cuda:1': 'cpu'})
+        torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
         # torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
@@ -424,45 +426,63 @@ def train_generate_model(generate_agent, generate_env: GenerateEnvironment, pars
             save_list = env_info['save_list']
             ac_action_pos = env_info['ac_action_pos']
             effect_sample_output_list_length = env_info['effect_sample_output_list_length']
-            for ac_code_ids, error_code_ids, inc, save, prog_id, ac_pos, sample_len in zip(original_states['input_seq'], states['input_seq'],
-                                                         original_states['includes'], save_list, original_states['id'],
-                                                                       ac_action_pos, effect_sample_output_list_length):
+
+            ac_code_ids_list = [c[1:-1] for c in original_states['input_seq']]
+            error_code_ids_list = [c[1:-1] for c in states['input_seq']]
+
+            do_compile_check = True
+            if do_compile_check:
+                compile_list = ac_code_ids_list + error_code_ids_list
+                continue_list = [True for _ in range(len(compile_list))]
+                last_res_list = [False for _ in range(len(compile_list))]
+                include_list = original_states['includes'] + original_states['includes']
+
+                _, compile_res_list = compile_code_ids_list(compile_list, continue_list, last_res_list,
+                                                       vocabulary=vocabulary,
+                                                       includes_list=include_list, file_path=file_path,
+                                                       target_file_path=target_file_path)
+                ac_res_list = compile_res_list[:len(ac_code_ids_list)]
+                error_res_list = compile_res_list[len(ac_code_ids_list):]
+            else:
+                ac_res_list = [True for _ in range(len(ac_code_ids_list))]
+                error_res_list = [False for _ in range(len(ac_code_ids_list))]
+
+            pool = get_compile_pool()
+            max_distance_list = [None for _ in range(batch_size)]
+            get_value_list = [lambda x: x for _ in range(batch_size)]
+            generate_args = list(zip(error_code_ids_list, ac_code_ids_list, max_distance_list))
+            generate_result = list(pool.starmap(generate_action_between_two_code, generate_args))
+            # generate_result = list(itertools.starmap(generate_action_between_two_code, generate_args))
+            distance_list, action_list = list(zip(*generate_result))
+
+            for ac_code_ids, error_code_ids, inc, save, prog_id, ac_pos, sample_len, ac_res, err_res, actions, dis \
+                    in zip(ac_code_ids_list, error_code_ids_list, original_states['includes'], save_list,
+                           original_states['id'], ac_action_pos, effect_sample_output_list_length,
+                           ac_res_list, error_res_list, action_list, distance_list):
                 # if save:
-                ac_code_ids = ac_code_ids[1:-1]
-                error_code_ids = error_code_ids[1:-1]
+                # ac_code_ids = ac_code_ids[1:-1]
+                # error_code_ids = error_code_ids[1:-1]
 
-                do_compile_check = False
-                if do_compile_check:
-                    _, ac_res = compile_code_ids_list([ac_code_ids], [True], [True], vocabulary=vocabulary,
-                                                      includes_list=[inc], file_path=file_path,
-                                                      target_file_path=target_file_path)
-                    ac_res = ac_res[0]
-
-                    _, err_res = compile_code_ids_list([error_code_ids], [True], [False], vocabulary=vocabulary,
-                                                      includes_list=[inc], file_path=file_path,
-                                                      target_file_path=target_file_path)
-                    err_res = err_res[0]
-
-                    if (not ac_res) or err_res:
-                        # continue
-                        pass
+                if (not ac_res) or err_res:
+                    # continue
+                    pass
 
                 ac_code_list = [vocabulary.id_to_word(c) for c in ac_code_ids]
                 # error_code_list = [vocabulary.id_to_word(c) for c in error_code_ids]
 
-                part_ac_code_list = ac_code_ids[ac_pos[0] + 1: ac_pos[1]]
-                part_err_code_list = error_code_ids[ac_pos[0] + 1: ac_pos[0]+sample_len+1]
+                # part_ac_code_list = ac_code_ids[ac_pos[0] + 1: ac_pos[1]]
+                # part_err_code_list = error_code_ids[ac_pos[0] + 1: ac_pos[0]+sample_len+1]
                 # dis, action_list = generate_action_between_two_code(error_code_list, ac_code_list,
                 #                                                     max_distance=max_generate_distance,
                 #                                                     get_value=lambda x: x)
-                dis, part_action_list = generate_action_between_two_code(part_err_code_list, part_ac_code_list,
-                                                                    max_distance=max_generate_distance,
-                                                                    get_value=lambda x: x)
-                for a in part_action_list:
-                    a['token_pos'] = a['token_pos'] + ac_pos[0] + 1
+                # dis, part_action_list = generate_action_between_two_code(part_err_code_list, part_ac_code_list,
+                #                                                     max_distance=max_generate_distance,
+                #                                                     get_value=lambda x: x)
+                for a in actions:
+                    # a['token_pos'] = a['token_pos'] + ac_pos[0] + 1
                     a['from_char'] = vocabulary.id_to_word(a['from_char']) if a['from_char'] != '' else ''
                     a['to_char'] = vocabulary.id_to_word(a['to_char']) if a['to_char'] != '' else ''
-                action_list = part_action_list
+                action_list = actions
                 # if 0 > dis or dis >= max_generate_distance:
                 #     continue
 

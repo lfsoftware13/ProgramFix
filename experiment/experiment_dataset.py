@@ -146,7 +146,7 @@ class IterateErrorDataSet(CustomerDataSet):
             if not self.is_flatten:
                 sample['is_copy_target'] = [one + [0] for one in row['is_copy_list']]
                 sample['copy_target'] = [one + [-1] for one in row['copy_pos_list']]
-                sample['copy_length'] = [len(one) for one in sample['is_copy_target']]
+                sample['copy_length'] = sample['input_length']
 
                 sample['sample_target'] = [one + [inner_end_id] for one in row['sample_ac_id_list']]
                 sample['sample_outputs_length'] = [len(ids) for ids in sample['sample_target']]

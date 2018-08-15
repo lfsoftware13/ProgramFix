@@ -1,3 +1,4 @@
+import copy
 import os
 import random
 
@@ -204,14 +205,15 @@ class GraphEncoder(nn.Module):
         input_seq = self.graph(input_seq, adjacent_matrix, copy_length)
         batch_size = input_seq.shape[0]
         if self.pointer_type == 'itr':
-            pointer_mask = torch_util.create_sequence_length_mask(copy_length, max_len=input_seq.shape[1])
+            p1_pointer_mask = torch_util.create_sequence_length_mask(copy_length-1, max_len=input_seq.shape[1])
+            p2_pointer_mask = torch_util.create_sequence_length_mask(copy_length, max_len=input_seq.shape[1])
             input_seq0 = input_seq
             input_seq1 = self.graph(input_seq, adjacent_matrix, copy_length)
             input_seq2 = self.graph(input_seq1, adjacent_matrix, copy_length)
             p1 = self.pointer_transform(torch.cat((input_seq0, input_seq1), dim=-1), ).squeeze(-1)
-            p1.data.masked_fill_(~pointer_mask, -float("inf"))
+            p1.data.masked_fill_(~p1_pointer_mask, -float("inf"))
             p2 = self.pointer_transform(torch.cat((input_seq0, input_seq2), dim=-1), ).squeeze(-1)
-            p2.data.masked_fill_(~pointer_mask, -float("inf"))
+            p2.data.masked_fill_(~p2_pointer_mask, -float("inf"))
             input_seq = self.graph(input_seq2, adjacent_matrix, copy_length)
         elif self.pointer_type == 'query':
             p1_pointer_mask = torch_util.create_sequence_length_mask(copy_length-1, max_len=input_seq.shape[1])
@@ -708,7 +710,7 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
 
         next_input = [[begin_id] + one + [end_id] for one in final_output]
         next_input = [next_inp if con else ori_inp for ori_inp, next_inp, con in
-                      zip(input_data['input_seq'], next_input, continue_list)]
+                      zip(input_seq, next_input, continue_list)]
         next_input_len = [len(one) for one in next_input]
         final_output = [next_inp[1:-1] for next_inp in next_input]
 
@@ -727,7 +729,7 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
 
     def parse_ast_node(one_final_output):
         input_seq_name = [vocabulary.id_to_word(token_id) for token_id in one_final_output]
-        print(' '.join(input_seq_name))
+        # print(' '.join(input_seq_name))
         code_graph = parse_ast_code_graph(input_seq_name)
         input_length = code_graph.graph_length + 2
         in_seq, graph = code_graph.graph

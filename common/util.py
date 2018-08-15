@@ -27,7 +27,9 @@ from sklearn.utils import shuffle
 from torch.utils.data import Dataset
 import torch.multiprocessing as mp
 
+from common.args_util import get_compile_pool
 from common.new_tokenizer import tokenize
+from config import num_processes
 
 
 def make_dir(*path: str) -> None:
@@ -722,9 +724,10 @@ def compile_syntax_c_code_by_gcc(code, file_path):
     return False
 
 
-def compile_c_code_by_gcc(code, file_path, target_file_path='main.out'):
-    file_path = add_pid_to_file_path(file_path)
-    target_file_path = add_pid_to_file_path(target_file_path)
+def compile_c_code_by_gcc(code, file_path, target_file_path='main.out', add_pid=True):
+    if add_pid:
+        file_path = add_pid_to_file_path(file_path)
+        target_file_path = add_pid_to_file_path(target_file_path)
     write_code_to_file(code, file_path)
     # print(code)
     res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
@@ -1062,24 +1065,45 @@ def get_position(l, t):
     return -1
 
 
-# num_processes = 6
-# compile_pool = mp.Pool(num_processes)
-def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path='', target_file_path='main.out'):
-    cur_continue = []
-    cur_result_list = []
+def compile_c_code_by_gcc_one_arg(one):
+    return compile_c_code_by_gcc(*one)
+
+
+def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path='', target_file_path='main.out', do_compile_pool=True):
+    compile_pool = get_compile_pool()
+    batch_size = len(final_output)
+    cur_continue = [True for _ in range(batch_size)]
+    cur_result_list = [False for _ in range(batch_size)]
+    compile_args_list = []
+    code_index_dict = []
+
+    count_i = 0
     for code_id, con, includes, res in zip(final_output, continue_list, includes_list, result_list):
         if not con:
-            cur_continue += [False]
-            cur_result_list += [res]
+            cur_continue[count_i] = False
+            cur_result_list[count_i] = res
+            count_i += 1
             continue
         code_list = [vocabulary.id_to_word(c) for c in code_id]
         code = ' '.join(code_list)
         for inc in includes:
             code = inc + '\n' + code
-        res = compile_c_code_by_gcc(code, file_path=file_path, target_file_path=target_file_path)
-        cur_result_list += [res]
+        compile_args_list += [(code, file_path, target_file_path)]
+        code_index_dict += [count_i]
+        count_i += 1
+    do_compile_pool = False
+    if do_compile_pool:
+        part_res_list = list(compile_pool.starmap(compile_c_code_by_gcc, compile_args_list))
+    else:
+        part_res_list = map(compile_c_code_by_gcc_one_arg, compile_args_list)
+
+
+
+    for i, res in enumerate(part_res_list):
+        act_i = code_index_dict[i]
+        cur_result_list[act_i] = res
         c = not res
-        cur_continue += [c]
+        cur_continue[act_i] = c
     return cur_continue, cur_result_list
 
 

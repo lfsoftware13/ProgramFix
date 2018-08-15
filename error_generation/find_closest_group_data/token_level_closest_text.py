@@ -90,7 +90,7 @@ def calculate_distance_and_action_between_two_code(error_tokenize, ac_tokenize, 
         get_token_value_fn = get_value
     equal_fn = generate_equal_fn(get_token_value_fn)
     distance, matrix = levenshtenin_distance(error_tokenize, ac_tokenize, equal_fn=equal_fn, max_distance=max_distance)
-    if distance < 0 or distance >= max_distance:
+    if max_distance is not None and (distance < 0 or distance >= max_distance):
         distance = -1
         action_list = []
         return distance, action_list

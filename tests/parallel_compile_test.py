@@ -16,7 +16,7 @@ int main(){
 '''
 
 
-def single_compile(t):
+def single_compile(t, t2, t3):
     file_path = '/dev/shm/main.c'
     target_file_path = '/dev/shm/main.out'
     file_path = add_pid_to_file_path(file_path)
@@ -25,19 +25,19 @@ def single_compile(t):
 
 
 if __name__ == '__main__':
-    total_times = 120
+    total_times = 30
     num_processes = 6
     multi_times = total_times // num_processes
     a = time.time()
-    for i in range(120):
-        single_compile(1)
+    for i in range(total_times):
+        single_compile(1, 2, 3)
     b = time.time()
     print('single compile time: {}'.format(b-a))
 
     pool = mp.Pool(num_processes)
     c = time.time()
     for i in range(multi_times):
-        pool.map(single_compile, [[] for _ in range(num_processes)])
+        pool.starmap(single_compile, [(1, 2, 3) for _ in range(num_processes)])
     d = time.time()
     print('parallel compile time: {}'.format(d-c))
 
