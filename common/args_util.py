@@ -1,6 +1,9 @@
 import torch.nn as nn
+import torch.multiprocessing as mp
 
-GPU_INDEX = 1
+from config import num_processes
+
+GPU_INDEX = 0
 Parallel = False
 
 
@@ -17,3 +20,12 @@ def to_cuda(x):
     elif GPU_INDEX is not None:
         x = x.cuda(GPU_INDEX)
     return x
+
+
+compile_pool = None
+def get_compile_pool():
+    global compile_pool
+    if compile_pool is None:
+        compile_pool = mp.Pool(num_processes)
+    return compile_pool
+

@@ -713,7 +713,7 @@ def encoder_sample_data_generate2(is_debug):
     max_length = 500
     do_flatten = False
     do_multi_step_sample = False
-    generate_step = 10
+    generate_step = 5
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
