@@ -29,7 +29,7 @@ def generate_action_between_two_code(error_tokens, ac_tokens, max_distance=None,
     return distance, action_list
 
 
-def generate_error_code_from_ac_code_and_action_fn(inner_end_id, begin_id, end_id):
+def generate_error_code_from_ac_code_and_action_fn(inner_end_id, begin_id, end_id, vocabulary=None, use_ast=False):
     def generate_error_code_from_ac_code_and_action(input_data, states, action, direct_output=False):
         """
 
@@ -55,11 +55,23 @@ def generate_error_code_from_ac_code_and_action_fn(inner_end_id, begin_id, end_i
         effect_sample_output_list_length = [len(s) for s in effect_sample_output_list]
 
         input_seq = input_data['input_seq']
+        copy_length = input_data['copy_length']
+        input_seq_name = input_data['input_seq_name']
+
+        input_seq = [inp[:cpy] for inp, cpy in zip(input_seq, copy_length)]
         final_output = []
+        final_output_name_list = []
         for i, one_input in enumerate(input_seq):
             effect_sample = effect_sample_output_list[i]
             one_output = one_input[1:p1[i] + 1] + effect_sample + one_input[p2[i]:-1]
             final_output += [one_output]
+            code_name_list = input_seq_name[i]
+            # code name list doesn't have <BEGIN> token .
+            # p1 and p2 should sub one to ignore the <BEGIN> token
+            effect_sample_name = [vocabulary.id_to_word(word_id) for word_id in effect_sample]
+            new_code_name_list = code_name_list[:p1[i]] + effect_sample_name + code_name_list[p2[i] - 1:]
+            final_output_name_list += [new_code_name_list]
+        # input_data['input_seq_name'] = final_output_name_list
 
         next_input = [[begin_id] + one + [end_id] for one in final_output]
         # next_input = [next_inp if con else ori_inp for ori_inp, next_inp, con in
@@ -70,7 +82,29 @@ def generate_error_code_from_ac_code_and_action_fn(inner_end_id, begin_id, end_i
         input_data['input_seq'] = next_input
         input_data['input_length'] = next_input_len
         input_data['copy_length'] = next_input_len
+        input_data['input_seq_name'] = final_output_name_list
+
+        if use_ast:
+            res = [create_one_code_res(names, vocabulary) for names in final_output_name_list]
+            input_seq, input_length, adjacent_matrix = list(zip(*res))
+            input_data['input_seq'] = input_seq
+            input_data['adj'] = adjacent_matrix
+            input_data['input_length'] = input_length
         return input_data, final_output, effect_sample_output_list_length
+
+    def parse_ast_node(input_seq_name):
+        # input_seq_name = [vocabulary.id_to_word(token_id) for token_id in one_final_output]
+        # print(' '.join(input_seq_name))
+        from c_parser.ast_parser import parse_ast_code_graph
+        code_graph = parse_ast_code_graph(input_seq_name)
+        input_length = code_graph.graph_length + 2
+        in_seq, graph = code_graph.graph
+        # begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+        # end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+        input_seq = [begin_id] + [vocabulary.word_to_id(t) for t in in_seq] + [end_id]
+        adj = [[a + 1, b + 1] for a, b, _ in graph] + [[b + 1, a + 1] for a, b, _ in graph]
+        return input_seq_name, input_seq, adj, input_length
+
     return generate_error_code_from_ac_code_and_action
 
 def create_output_from_actions_fn(create_or_sample_fn):
@@ -187,7 +221,8 @@ def create_reward_by_compile(result_list, states, actions, continue_list):
     return new_result_list, done_list
 
 
-def generate_target_by_code_and_actions(ac_code, actions, prog_id, one_includes, keyword_ids, inner_begin_id, inner_end_id):
+def generate_target_by_code_and_actions(ac_code, actions, prog_id, one_includes, keyword_ids, inner_begin_id,
+                                        inner_end_id, use_ast=False, vocabulary=None):
     """
     input argument are all in one records for multi iterate step.
     create all batch data info from ac code and actions .
@@ -211,6 +246,14 @@ def generate_target_by_code_and_actions(ac_code, actions, prog_id, one_includes,
     from experiment.parse_xy_util import create_sample_is_copy
     from experiment.parse_xy_util import filter_repeat_action_list
     from experiment.parse_xy_util import create_target_ac_token_id_list
+    from experiment.parse_xy_util import create_token_id_input
+    from experiment.parse_xy_util import create_token_ids_by_name_fn
+    from experiment.parse_xy_util import add_begin_end_label
+    from experiment.parse_xy_util import create_one_token_id_by_name_fn
+
+    ac_code_with_label = add_begin_end_label(ac_code)
+    ac_code_id_with_label = create_one_token_id_by_name_fn(keyword_voc=vocabulary)(ac_code_with_label)
+
     action_sort_fn = action_list_sorted_no_reverse
     actions = action_sort_fn(actions)
     actions = filter_repeat_action_list(actions)
@@ -220,32 +263,43 @@ def generate_target_by_code_and_actions(ac_code, actions, prog_id, one_includes,
     action_bias_map = {INSERT: 1, DELETE: -1, CHANGE: 0}
     extract_action_start_pos_fn = extract_action_part_start_pos_fn(action_bias_map=action_bias_map)
     ac_pos_list, error_pos_list = extract_action_start_pos_fn(action_part_list)
-    one = {'ac_code_name_with_labels': ac_code,
+    one = {'ac_code_name_with_labels': ac_code_with_label,
            'action_part_list': action_part_list,
            'ac_pos_list': ac_pos_list,
            'error_pos_list': error_pos_list}
     one = create_sample_error_position_with_iterate(one)
+    token_name_list = one['token_name_list']
+    sample_ac_code_list = one['sample_ac_code_list']
+    sample_error_code_list = one['sample_error_code_list']
 
-    token_id_list = one['token_name_list']
-    sample_ac_id_list = one['sample_ac_code_list']
-    sample_error_id_list = one['sample_error_code_list']
+    one = {'token_name_list': token_name_list}
+    one = create_token_id_input(one, keyword_voc=vocabulary)
+    token_id_list = one['token_id_list']
+    token_length_list = one['token_length_list']
+
+    create_token_id_by_name = create_token_ids_by_name_fn(keyword_voc=vocabulary)
+    sample_ac_id_list, sample_ac_len_list = create_token_id_by_name(sample_ac_code_list)
+    # sample_ac_id_list, sample_ac_len_list = list(zip(*sample_res))
+
+    sample_error_id_list, sample_error_len_list = create_token_id_by_name(sample_error_code_list)
+    # sample_error_id_list, sample_error_len_list = list(zip(*sample_res))
 
     iterate_num = len(token_id_list)
 
-    sample_ac_len_list = [len(l) for l in sample_ac_id_list]
-    sample_error_len_list = [len(l) for l in sample_error_id_list]
+    # sample_ac_len_list = [len(l) for l in sample_ac_id_list]
+    # sample_error_len_list = [len(l) for l in sample_error_id_list]
 
     # keyword_ids = create_effect_keyword_ids_set(keyword_vocab)
 
     create_input_ids_set_fn = lambda x: list(keyword_ids | set(x[1:-1]))
-    sample_mask_list = create_input_ids_set_fn(ac_code)
+    sample_mask_list = create_input_ids_set_fn(ac_code_id_with_label)
 
     one = {'sample_ac_id_list': sample_ac_id_list, 'token_id_list': token_id_list}
     one = create_sample_is_copy(one, keyword_ids)
     is_copy_list = one['is_copy_list']
     copy_pos_list = one['copy_pos_list']
 
-    one = {'token_id_list': token_id_list, 'ac_code_id_with_labels': ac_code}
+    one = {'token_id_list': token_id_list, 'ac_code_id_with_labels': ac_code_id_with_label}
     one = create_target_ac_token_id_list(one)
     target_ac_token_id_list = one['target_ac_token_id_list']
 
@@ -271,12 +325,17 @@ def generate_target_by_code_and_actions(ac_code, actions, prog_id, one_includes,
     adjacent_matrix = [0 for _ in range(iterate_num)]
     input_seq = token_id_list
     input_length = [len(ids) for ids in input_seq]
-    copy_length = input_length
+    copy_length = [len(ids) for ids in input_seq]
     target = [[inner_begin_id] + ac_ids + [inner_end_id] for ac_ids in sample_ac_id_list]
     includes = [one_includes for _ in range(iterate_num)]
     id_list = [prog_id for _ in range(iterate_num)]
+    token_name_list_output = [names[1:-1] for names in token_name_list]
 
-    sample = {'input_seq': input_seq, 'input_length': input_length, 'is_copy_target': is_copy_target,
+    if use_ast:
+        res = [create_one_code_res(names, vocabulary) for names in token_name_list_output]
+        input_seq, input_length, adjacent_matrix = list(zip(*res))
+
+    sample = {'input_seq': input_seq, 'input_length': input_length, 'input_seq_name': token_name_list_output, 'is_copy_target': is_copy_target,
               'copy_target': copy_target, 'copy_length': copy_length, 'sample_target': sample_target,
               'sample_small_target': sample_small_target, 'sample_outputs_length': sample_outputs_length,
               'target': target, 'p1_target': p1_target, 'p2_target': p2_target,
@@ -287,13 +346,25 @@ def generate_target_by_code_and_actions(ac_code, actions, prog_id, one_includes,
     return sample
 
 
-def generate_ac_to_error_action_and_create_input_and_target(cur_error_code_ids, ac_code_ids, max_distance, prog_id,
+def create_one_code_res(input_seq_name, vocabulary):
+    from c_parser.ast_parser import parse_ast_code_graph
+    code_graph = parse_ast_code_graph(input_seq_name)
+    input_length = code_graph.graph_length + 2
+    in_seq, graph = code_graph.graph
+    begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+    end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+    input_seq = [begin_id] + [vocabulary.word_to_id(t) for t in in_seq] + [end_id]
+    adj = [[a + 1, b + 1] for a, b, _ in graph] + [[b + 1, a + 1] for a, b, _ in graph]
+    return input_seq, input_length, adj
+
+
+def generate_ac_to_error_action_and_create_input_and_target(cur_error_code_names, ac_code_names, max_distance, prog_id,
                                                             one_includes, keyword_ids, inner_begin_id, inner_end_id,
-                                                            is_continue, last_sample):
+                                                            is_continue, last_sample, use_ast, vocabulary):
     """
 
-    :param cur_error_code_ids:
-    :param ac_code_ids:
+    :param cur_error_code_names:
+    :param ac_code_names:
     :param max_distance_list:
     :param actions:
     :param prog_id:
@@ -305,15 +376,16 @@ def generate_ac_to_error_action_and_create_input_and_target(cur_error_code_ids, 
     """
     if not is_continue and last_sample is not None:
         return last_sample
-    distance, actions = generate_action_between_two_code(cur_error_code_ids[1:-1], ac_code_ids[1:-1],
+    distance, actions = generate_action_between_two_code(cur_error_code_names, ac_code_names,
                                                          max_distance, get_value=lambda x: x)
     if len(actions) == 0:
         from common.action_constants import ActionType
-        random_delete = random.randint(0, len(ac_code_ids) - 2 - 1)
-        actions = [{'act_type': ActionType.DELETE, 'from_char': ac_code_ids[random_delete],
+        random_delete = random.randint(0, len(ac_code_names) - 2 - 1)
+        actions = [{'act_type': ActionType.DELETE, 'from_char': ac_code_names[random_delete],
                         'to_char': '', 'token_pos': random_delete}]
     actions = convert_action_map_to_old_action(actions)
-    sample = generate_target_by_code_and_actions(ac_code_ids, actions, prog_id, one_includes, keyword_ids, inner_begin_id, inner_end_id)
+    sample = generate_target_by_code_and_actions(ac_code_names, actions, prog_id, one_includes, keyword_ids,
+                                                 inner_begin_id, inner_end_id, use_ast, vocabulary)
     return sample
 
 
@@ -393,7 +465,7 @@ class GenerateEnvironment(gym.Env):
                  parse_input_batch_data_for_solver_fn, solver_create_next_input_batch_fn, vocabulary,
                  compile_code_ids_fn, extract_includes_fn, create_reward_by_compile_fn, parse_target_batch_data_fn,
                  create_records_all_output_fn, evaluate_output_result_fn,
-                 data_radio=1.0, inner_begin_label=None, inner_end_label=None):
+                 data_radio=1.0, inner_begin_label=None, inner_end_label=None, use_ast=False):
         self.s_model = s_model
         self.dataset = dataset
         self.batch_size = batch_size
@@ -408,6 +480,7 @@ class GenerateEnvironment(gym.Env):
         self.data_radio = data_radio
         self.create_reward_by_compile_fn = create_reward_by_compile_fn
         self.parse_target_batch_data_fn = parse_target_batch_data_fn
+        self.use_ast = use_ast
 
         self.continue_list = [True for _ in range(batch_size)]
         self.result_list = [True for _ in range(batch_size)]
@@ -448,7 +521,9 @@ class GenerateEnvironment(gym.Env):
             # generate action between ac code and error code
             max_distance_list = [None for _ in range(batch_size)]
             cur_error_code_ids = batch_data['input_seq']
+            cur_error_code_names = batch_data['input_seq_name']
             ac_code_ids = self.ac_batch_data['input_seq']
+            ac_code_names = self.ac_batch_data['input_seq_name']
             # generate_args = list(zip(cur_error_code_ids, ac_code_ids, max_distance_list))
             # generate_result_list = list(pool.starmap(generate_action_between_two_code, generate_args))
             # action_list, distance_list = list(zip(*generate_result_list))
@@ -459,14 +534,17 @@ class GenerateEnvironment(gym.Env):
             keyword_ids_list = [self.keyword_ids for _ in range(batch_size)]
             inner_begin_label_list = [self.inner_begin_label for _ in range(batch_size)]
             inner_end_label_list = [self.inner_end_label for _ in range(batch_size)]
+            use_ast_list = [self.use_ast for _ in range(batch_size)]
+            vocabulary_list = [self.vocabulary for _ in range(batch_size)]
             # generate_target_by_code_and_actions(ac_code_ids, action_list, prog_id_list, includes_list, self.keyword_ids,
             #                                     self.inner_begin_label, self.inner_end_label)
 
-            generate_args = list(zip(cur_error_code_ids, ac_code_ids, max_distance_list, prog_id_list, includes_list,
-                                     keyword_ids_list, inner_begin_label_list, inner_end_label_list, self.continue_list, self.last_sample))
+            generate_args = list(zip(cur_error_code_names, ac_code_names, max_distance_list, prog_id_list, includes_list,
+                                     keyword_ids_list, inner_begin_label_list, inner_end_label_list, self.continue_list,
+                                     self.last_sample, use_ast_list, vocabulary_list))
             # generate_args = [list(args) for args in generate_args]
-            generate_result_list = list(pool.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
-            # generate_result_list = list(itertools.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
+            # generate_result_list = list(pool.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
+            generate_result_list = list(itertools.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
             self.last_sample = generate_result_list
             result = torch.ones(batch_size).byte().to(actions[0].device)
             for one_iterate_sample in get_one_step_of_sample(generate_result_list):

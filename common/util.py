@@ -732,7 +732,7 @@ def compile_c_code_by_gcc(code, file_path, target_file_path='main.out', add_pid=
     # print(code)
     res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
     # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {}'.format(target_file_path, file_path))
-    # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {}'.format(target_file_path, file_path))
+    # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} > nul 2> nul'.format(target_file_path, file_path))
     if res == 0:
         return True
     return False
@@ -1069,7 +1069,8 @@ def compile_c_code_by_gcc_one_arg(one):
     return compile_c_code_by_gcc(*one)
 
 
-def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path='', target_file_path='main.out', do_compile_pool=True):
+def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path='',
+                          target_file_path='main.out', do_compile_pool=True, need_transform=True):
     compile_pool = get_compile_pool()
     batch_size = len(final_output)
     cur_continue = [True for _ in range(batch_size)]
@@ -1078,20 +1079,20 @@ def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, 
     code_index_dict = []
 
     count_i = 0
-    for code_id, con, includes, res in zip(final_output, continue_list, includes_list, result_list):
+    for code_list, con, includes, res in zip(final_output, continue_list, includes_list, result_list):
         if not con:
             cur_continue[count_i] = False
             cur_result_list[count_i] = res
             count_i += 1
             continue
-        code_list = [vocabulary.id_to_word(c) for c in code_id]
+        if need_transform:
+            code_list = [vocabulary.id_to_word(c) for c in code_list]
         code = ' '.join(code_list)
         for inc in includes:
             code = inc + '\n' + code
         compile_args_list += [(code, file_path, target_file_path)]
         code_index_dict += [count_i]
         count_i += 1
-    do_compile_pool = False
     if do_compile_pool:
         part_res_list = list(compile_pool.starmap(compile_c_code_by_gcc, compile_args_list))
     else:

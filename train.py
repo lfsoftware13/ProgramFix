@@ -30,8 +30,8 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        # torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
-        torch_util.load_model(m, path)
+        torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
+        # torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
         print("create new model")
@@ -207,7 +207,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
 
                     model_output = model.forward(*model_input, do_sample=True, do_beam_search=do_beam_search)
 
-                    input_data, final_output, output_records = create_multi_step_next_input_batch_fn(input_data,
+                    input_data, final_output, output_records, final_output_name_list = create_multi_step_next_input_batch_fn(input_data,
                                                                                                      model_input,
                                                                                                      model_output,
                                                                                                      continue_list,
@@ -215,9 +215,10 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                     final_output_list += [final_output]
                     output_records_list += [output_records]
 
-                    continue_list, result_list = compile_code_ids_list(final_output, continue_list, result_list, vocabulary=vocabulary,
+                    continue_list, result_list = compile_code_ids_list(final_output_name_list, continue_list, result_list, vocabulary=vocabulary,
                                                           includes_list=extract_includes_fn(input_data), file_path=file_path,
-                                                                       target_file_path=target_file_path)
+                                                                       target_file_path=target_file_path, do_compile_pool=True,
+                                                                       need_transform=False)
                     result_records_list += [result_list]
                     if sum(continue_list) == 0:
                         break

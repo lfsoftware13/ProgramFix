@@ -433,19 +433,22 @@ class EncoderSampleModel(nn.Module):
         pad_compatible_tokens = pad_compatible_tokens[:, 0]
         return p1_o, p2_o, is_copy, copy_output, sample_output, pad_compatible_tokens
 
-    def create_one_step_token_masks(self, ori_input_seq, input_length, continue_mask):
+    def create_one_step_token_masks(self, ori_input_seq, input_length, continue_mask, copy_length=None):
         if self.mask_type == 'static':
             if not hasattr(self, 'compatible_tokens') or self.compatible_tokens is None:
-                self.compatible_tokens, self.compatible_tokens_length = self.create_static_token_mask(ori_input_seq, input_length)
+                self.compatible_tokens, self.compatible_tokens_length = self.create_static_token_mask(ori_input_seq,
+                                                                                                      input_length,
+                                                                                                      copy_length)
             return self.compatible_tokens, self.compatible_tokens_length
         return None, None
 
-    def create_static_token_mask(self, ori_input_seq, input_length):
+    def create_static_token_mask(self, ori_input_seq, input_length, copy_length):
         ori_input_seq_list = ori_input_seq.tolist()
         input_length_list = input_length.tolist()
+        copy_length_list = copy_length.tolist()
         mask_list = []
-        for inp, l in zip(ori_input_seq_list, input_length_list):
-            input_set = self.keyword_ids_set | set(inp[1:l-1]) | {self.inner_end_label}
+        for inp, l, c in zip(ori_input_seq_list, input_length_list, copy_length_list):
+            input_set = self.keyword_ids_set | set(inp[1:c-1]) | {self.inner_end_label}
             mask_list += [[sorted(input_set)]]
         mask_len_list = [[len(j) for j in i] for i in mask_list]
         compatible_tokens = torch.LongTensor(PaddedList(mask_list)).to(ori_input_seq.device)
@@ -458,10 +461,11 @@ class EncoderSampleModel(nn.Module):
                                             encoder_outputs=encoder_output, encoder_mask=~encoder_mask,
                                             teacher_forcing_ratio=0)
         decoder_output = torch.stack(decoder_output, dim=1)
-        copy_mask = create_sequence_length_mask(copy_length, max_len=decoder_inputs.shape[1])
+        copy_mask = create_sequence_length_mask(copy_length, max_len=encoder_output.shape[1])
 
         compatible_tokens, compatible_tokens_length = \
-            self.create_one_step_token_masks(ori_input_seq=ori_input_seq, input_length=input_length, continue_mask=continue_mask)
+            self.create_one_step_token_masks(ori_input_seq=ori_input_seq, input_length=input_length, continue_mask=continue_mask,
+                                             copy_length=copy_length)
 
         is_copy, copy_output, sample_output = self.output(decoder_output, encoder_output, copy_mask, compatible_tokens,
                                                           compatible_tokens_length, is_sample=True,
@@ -649,11 +653,13 @@ def create_output_ids_fn(end_id):
 
         input_seq = model_input[1]
         input_seq_len = model_input[2].tolist()
+        copy_len_list = model_input[3].tolist()
         input_seq_list = torch.unbind(input_seq, dim=0)
+        input_seq_list = [seq[:cpy] for cpy, seq in zip(copy_len_list, input_seq_list)]
         final_output = []
         for i, one_input in enumerate(input_seq_list):
             effect_sample = effect_sample_output_list[i]
-            input_len = input_seq_len[i]
+            input_len = copy_len_list[i]
             one_output = torch.cat([one_input[1:p1[i]+1], torch.LongTensor(effect_sample).to(one_input.device), one_input[p2[i]:input_len-1]], dim=-1)
             final_output += [one_output]
         # pad output tensor in python list final output
@@ -699,14 +705,24 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
                 pass
             effect_sample_output_list += [sample]
 
+
         input_seq = input_data['input_seq']
         copy_length = input_data['copy_length']
+        input_seq_name = input_data['input_seq_name']
+
         input_seq = [inp[:cpy] for inp, cpy in zip(input_seq, copy_length)]
         final_output = []
+        final_output_name_list = []
         for i, one_input in enumerate(input_seq):
             effect_sample = effect_sample_output_list[i]
             one_output = one_input[1:p1[i] + 1] + effect_sample + one_input[p2[i]:-1]
             final_output += [one_output]
+            code_name_list = input_seq_name[i]
+            # code name list doesn't have <BEGIN> token .
+            # p1 and p2 should sub one to ignore the <BEGIN> token
+            effect_sample_name = [vocabulary.id_to_word(word_id) for word_id in effect_sample]
+            new_code_name_list = code_name_list[:p1[i]] + effect_sample_name + code_name_list[p2[i]-1:]
+            final_output_name_list += [new_code_name_list]
 
         next_input = [[begin_id] + one + [end_id] for one in final_output]
         next_input = [next_inp if con else ori_inp for ori_inp, next_inp, con in
@@ -717,18 +733,19 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
         input_data['input_seq'] = next_input
         input_data['input_length'] = next_input_len
         input_data['copy_length'] = next_input_len
+        input_data['input_seq_name'] = final_output_name_list
 
         if use_ast:
-            ast_output = [parse_ast_node(code_ids) for code_ids in final_output]
+            ast_output = [parse_ast_node(code_names) for code_names in final_output_name_list]
             input_seq_name, input_seq, adj, input_length = list(zip(*ast_output))
             input_data['input_seq_name'] = input_seq_name
             input_data['input_seq'] = input_seq
             input_data['adj'] = adj
             input_data['input_length'] = input_length
-        return input_data, final_output, output_record_list
+        return input_data, final_output, output_record_list, final_output_name_list
 
-    def parse_ast_node(one_final_output):
-        input_seq_name = [vocabulary.id_to_word(token_id) for token_id in one_final_output]
+    def parse_ast_node(input_seq_name):
+        # input_seq_name = [vocabulary.id_to_word(token_id) for token_id in one_final_output]
         # print(' '.join(input_seq_name))
         code_graph = parse_ast_code_graph(input_seq_name)
         input_length = code_graph.graph_length + 2
@@ -750,7 +767,8 @@ def create_records_all_output(model_input, model_output, do_sample=False):
         compatible_tokens = model_input[8]
     p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
     p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
-    is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
+    # is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
+    is_copy = torch.sigmoid(is_copy) > 0.5
     # is_copy = torch.squeeze(is_copy, dim=-1) > 0.5
     copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
     sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
@@ -771,7 +789,8 @@ def create_records_all_output_for_beam(model_input, model_output, do_sample=Fals
     p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
     p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
     if not direct_output:
-        is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
+        # is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
+        is_copy = torch.sigmoid(is_copy) > 0.5
         copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
         sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
         sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)

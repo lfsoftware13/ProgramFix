@@ -345,7 +345,8 @@ class CombineNodeIterateErrorDataSet(CustomerDataSet):
                 return 710
 
         if self.use_ast:
-            df = df[df['error_token_name_list'].map(test_parse_ast_code_graph) < 700]
+            # df = df[df['error_token_name_list'].map(test_parse_ast_code_graph) < 700]
+            pass
 
         return df
 
@@ -553,8 +554,8 @@ def load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug, vocabul
         data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False)
     else:
         data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=False)
-    if use_ast:
-        vocabulary = load_graph_vocabulary(vocabulary)
+    # if use_ast:
+    #     vocabulary = load_graph_vocabulary(vocabulary)
 
     datasets = [CombineNodeIterateErrorDataSet(pd.DataFrame(dd), vocabulary, name, transformer_vocab_slk=mask_transformer,
                                     do_flatten=False, use_ast=use_ast, do_multi_step_sample=do_multi_step_sample)
@@ -581,13 +582,13 @@ def load_deepfix_ac_code_for_generate_dataset(is_debug, vocabulary, mask_transfo
         new_dict['error_token_id_list'] = data_dict['ac_code_ids']
         new_dict['includes'] = data_dict['includes']
         new_dict['distance'] = data_dict['distance']
-        new_dict['error_token_name_list'] = data_dict['error_token_name_list']
+        new_dict['error_token_name_list'] = data_dict['ac_code_name_with_labels']
         return new_dict
 
     ac_data_dict = convert_error_to_ac_dict(data_dict)
 
-    if use_ast:
-        vocabulary = load_graph_vocabulary(vocabulary)
+    # if use_ast:
+    #     vocabulary = load_graph_vocabulary(vocabulary)
 
     dataset = CombineNodeIterateErrorDataSet(pd.DataFrame(ac_data_dict), vocabulary, 'ac_code',
                                              transformer_vocab_slk=mask_transformer, do_flatten=True,
@@ -603,7 +604,7 @@ def load_addition_generate_iterate_solver_train_dataset_fn(vocabulary, mask_tran
                                                         use_ast=False, do_multi_step_sample=False):
     def load_addition_generate_iterate_solver_train_dataset(df, id_to_prog_dict):
         df_dict = load_generate_code_for_solver_model_iterate_data(df, convert_field_fn=None, convert_field_dict={},
-                                                         do_flatten=False)
+                                                         do_flatten=False, vocabulary=vocabulary)
         addition_dataset = CombineNodeIterateErrorDataSet(pd.DataFrame(df_dict), vocabulary, 'generate',
                                                transformer_vocab_slk=mask_transformer, do_flatten=False,
                                                use_ast=use_ast, do_multi_step_sample=do_multi_step_sample,

@@ -37,8 +37,8 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
-        # torch_util.load_model(m, path)
+        # torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
+        torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
         print("create new model")
@@ -211,7 +211,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
 
                     model_output = model.forward(*model_input, do_sample=True, do_beam_search=do_beam_search)
 
-                    input_data, final_output, output_records = create_multi_step_next_input_batch_fn(input_data,
+                    input_data, final_output, output_records, final_output_name_list = create_multi_step_next_input_batch_fn(input_data,
                                                                                                      model_input,
                                                                                                      model_output,
                                                                                                      continue_list,
@@ -219,9 +219,10 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                     final_output_list += [final_output]
                     output_records_list += [output_records]
 
-                    continue_list, result_list = compile_code_ids_list(final_output, continue_list, result_list, vocabulary=vocabulary,
+                    continue_list, result_list = compile_code_ids_list(final_output_name_list, continue_list, result_list, vocabulary=vocabulary,
                                                           includes_list=extract_includes_fn(input_data), file_path=file_path,
-                                                                       target_file_path=target_file_path)
+                                                                       target_file_path=target_file_path, do_compile_pool=True,
+                                                                       need_transform=False)
                     result_records_list += [result_list]
                     if sum(continue_list) == 0:
                         break
@@ -376,6 +377,8 @@ def train_generate_model(generate_agent, generate_env: GenerateEnvironment, pars
     generate_agent.train()
     generate_env.eval()
     avg_reward = None
+    from common.pycparser_util import tokenize_by_clex_fn
+    tokenize_fn = tokenize_by_clex_fn()
 
     save_data_dict = {'ac_code': [], 'action_character_list': [], 'includes': [],
                       'error_count': [], 'distance': [], 'id': []}
@@ -428,11 +431,26 @@ def train_generate_model(generate_agent, generate_env: GenerateEnvironment, pars
             effect_sample_output_list_length = env_info['effect_sample_output_list_length']
 
             ac_code_ids_list = [c[1:-1] for c in original_states['input_seq']]
-            error_code_ids_list = [c[1:-1] for c in states['input_seq']]
+            ac_code_names_list = original_states['input_seq_name']
+            error_code_ids_list = [c[1:l-1] for c, l in zip(states['input_seq'], states['copy_length'])]
+            error_code_names_list = states['input_seq_name']
+
+            for ids, c in zip(error_code_ids_list, states['copy_length']):
+                for p in ids:
+                    if p > 5941:
+                        a = 1
+
+            new_error_code_names_list = []
+            for error_code_list in error_code_names_list:
+                err_code = ' '.join(error_code_list)
+                tokens = tokenize_fn(err_code)
+                one_error_tokens = [tok.value for tok in tokens]
+                new_error_code_names_list += [one_error_tokens]
+            error_code_names_list = new_error_code_names_list
 
             do_compile_check = True
             if do_compile_check:
-                compile_list = ac_code_ids_list + error_code_ids_list
+                compile_list = ac_code_names_list + error_code_names_list
                 continue_list = [True for _ in range(len(compile_list))]
                 last_res_list = [False for _ in range(len(compile_list))]
                 include_list = original_states['includes'] + original_states['includes']
@@ -440,23 +458,23 @@ def train_generate_model(generate_agent, generate_env: GenerateEnvironment, pars
                 _, compile_res_list = compile_code_ids_list(compile_list, continue_list, last_res_list,
                                                        vocabulary=vocabulary,
                                                        includes_list=include_list, file_path=file_path,
-                                                       target_file_path=target_file_path)
-                ac_res_list = compile_res_list[:len(ac_code_ids_list)]
-                error_res_list = compile_res_list[len(ac_code_ids_list):]
+                                                       target_file_path=target_file_path, do_compile_pool=True,
+                                                            need_transform=False)
+                ac_res_list = compile_res_list[:len(ac_code_names_list)]
+                error_res_list = compile_res_list[len(ac_code_names_list):]
             else:
-                ac_res_list = [True for _ in range(len(ac_code_ids_list))]
-                error_res_list = [False for _ in range(len(ac_code_ids_list))]
+                ac_res_list = [True for _ in range(len(ac_code_names_list))]
+                error_res_list = [False for _ in range(len(ac_code_names_list))]
 
             pool = get_compile_pool()
             max_distance_list = [None for _ in range(batch_size)]
-            get_value_list = [lambda x: x for _ in range(batch_size)]
-            generate_args = list(zip(error_code_ids_list, ac_code_ids_list, max_distance_list))
+            generate_args = list(zip(error_code_names_list, ac_code_names_list, max_distance_list))
             generate_result = list(pool.starmap(generate_action_between_two_code, generate_args))
             # generate_result = list(itertools.starmap(generate_action_between_two_code, generate_args))
             distance_list, action_list = list(zip(*generate_result))
 
-            for ac_code_ids, error_code_ids, inc, save, prog_id, ac_pos, sample_len, ac_res, err_res, actions, dis \
-                    in zip(ac_code_ids_list, error_code_ids_list, original_states['includes'], save_list,
+            for ac_code_list, error_code_ids, inc, save, prog_id, ac_pos, sample_len, ac_res, err_res, actions, dis \
+                    in zip(ac_code_names_list, error_code_ids_list, original_states['includes'], save_list,
                            original_states['id'], ac_action_pos, effect_sample_output_list_length,
                            ac_res_list, error_res_list, action_list, distance_list):
                 # if save:
@@ -467,7 +485,7 @@ def train_generate_model(generate_agent, generate_env: GenerateEnvironment, pars
                     # continue
                     pass
 
-                ac_code_list = [vocabulary.id_to_word(c) for c in ac_code_ids]
+                # ac_code_list = [vocabulary.id_to_word(c) for c in ac_code_ids]
                 # error_code_list = [vocabulary.id_to_word(c) for c in error_code_ids]
 
                 # part_ac_code_list = ac_code_ids[ac_pos[0] + 1: ac_pos[1]]
@@ -478,10 +496,10 @@ def train_generate_model(generate_agent, generate_env: GenerateEnvironment, pars
                 # dis, part_action_list = generate_action_between_two_code(part_err_code_list, part_ac_code_list,
                 #                                                     max_distance=max_generate_distance,
                 #                                                     get_value=lambda x: x)
-                for a in actions:
-                    # a['token_pos'] = a['token_pos'] + ac_pos[0] + 1
-                    a['from_char'] = vocabulary.id_to_word(a['from_char']) if a['from_char'] != '' else ''
-                    a['to_char'] = vocabulary.id_to_word(a['to_char']) if a['to_char'] != '' else ''
+                # for a in actions:
+                #     # a['token_pos'] = a['token_pos'] + ac_pos[0] + 1
+                #     a['from_char'] = vocabulary.id_to_word(a['from_char']) if a['from_char'] != '' else ''
+                #     a['to_char'] = vocabulary.id_to_word(a['to_char']) if a['to_char'] != '' else ''
                 action_list = actions
                 # if 0 > dis or dis >= max_generate_distance:
                 #     continue

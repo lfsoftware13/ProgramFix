@@ -363,6 +363,15 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
     df = df.apply(create_sample_error_position_with_iterate, raw=True, axis=1)
     print('after create_sample_error_position_with_iterate : {}'.format(len(df)))
 
+    # do check multi token action
+    check_multi_token_action = True
+    if check_multi_token_action:
+        print('before check_multi_token_action: {}'.format(len(df)))
+        check_action_fn = lambda name_list: check_multi_action(name_list, tokenize_fn)
+        df['multi_action_res'] = df['token_name_list'].map(check_action_fn)
+        df = df[df['multi_action_res']]
+        print('after check_multi_token_action: {}'.format(len(df)))
+
     # convert input code to id
     df = df.apply(create_token_id_input, raw=True, axis=1, keyword_voc=keyword_vocab)
     df = df[df['res'].map(lambda x: x is not None)]
@@ -395,7 +404,27 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
 
     return df['token_id_list'], df['sample_error_id_list'], df['sample_ac_id_list'], df['ac_pos_list'], \
            df['error_pos_list'], df['ac_code_id_with_labels'], df['is_copy_list'], df['copy_pos_list'], \
-           df['sample_mask_list'], df['token_name_list'], df['target_ac_token_id_list']
+           df['sample_mask_list'], df['token_name_list'], df['target_ac_token_id_list'], df['ac_code_name_with_labels']
+
+
+def check_multi_action(token_names_list, tokenize_fn):
+    def check_one_multi_action(token_names_without_label):
+        code = ' '.join(token_names_without_label)
+        new_tokens = tokenize_fn(code)
+        if new_tokens is None:
+            return False
+        new_tokens = [tok.value for tok in new_tokens]
+        if len(token_names_without_label) != len(new_tokens):
+            return False
+        for o, n in zip(token_names_without_label, new_tokens):
+            if o != n:
+                return False
+        return True
+    check_res = [check_one_multi_action(names[1:-1]) for names in token_names_list]
+    for r in check_res:
+        if not r:
+            return False
+    return True
 
 
 def create_target_ac_token_id_list(one):

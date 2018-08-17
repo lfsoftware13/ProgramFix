@@ -297,21 +297,24 @@ def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False):
                   'distance': train['distance'], 'ac_code_ids': train_data[5],
                   'is_copy_list': train_data[6], 'copy_pos_list': train_data[7], 'sample_mask_list': train_data[8],
                   'error_token_name_list': train_data[9], 'id': train['id'],
-                  'target_ac_token_id_list': train_data[10]}
+                  'target_ac_token_id_list': train_data[10],
+                  'ac_code_name_with_labels': train_data[11]}
     valid_dict = {'error_token_id_list': valid_data[0], 'sample_error_id_list': valid_data[1],
                   'sample_ac_id_list': valid_data[2], 'ac_pos_list': valid_data[3],
                   'error_pos_list': valid_data[4], 'includes': valid['includes'],
                   'distance': valid['distance'], 'ac_code_ids': valid_data[5],
                   'is_copy_list': valid_data[6], 'copy_pos_list': valid_data[7], 'sample_mask_list': valid_data[8],
                   'error_token_name_list': valid_data[9], 'id': valid['id'],
-                  'target_ac_token_id_list': valid_data[10]}
+                  'target_ac_token_id_list': valid_data[10],
+                  'ac_code_name_with_labels': valid_data[11]}
     test_dict = {'error_token_id_list': test_data[0], 'sample_error_id_list': test_data[1],
                  'sample_ac_id_list': test_data[2], 'ac_pos_list': test_data[3],
                  'error_pos_list': test_data[4], 'includes': test['includes'],
                  'distance': test['distance'], 'ac_code_ids': test_data[5],
                  'is_copy_list': test_data[6], 'copy_pos_list': test_data[7], 'sample_mask_list': test_data[8],
                  'error_token_name_list': test_data[9], 'id': test['id'],
-                 'target_ac_token_id_list': test_data[10]}
+                 'target_ac_token_id_list': test_data[10],
+                 'ac_code_name_with_labels': test_data[11]}
 
     if do_flatten:
         train_dict = flatten_iterative_data(train_dict)
@@ -445,17 +448,14 @@ def load_deepfix_ac_data_for_generator_100(filter_unk=False):
 
 
 def load_generate_code_for_solver_model_iterate_data(df, convert_field_fn=None, convert_field_dict={},
-                                                     do_flatten=False):
-    vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
-                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
-                                                   addition_tokens=['<PAD>'])
+                                                     do_flatten=False, vocabulary=None):
     if convert_field_fn is not None:
         df = convert_field_fn(df, **convert_field_dict)
     df['action_character_list'] = df['action_character_list'].map(convert_action_map_to_old_action)
 
     tokenize_fn = tokenize_by_clex_fn()
     parse_fn = parse_iterative_sample_action_error_code
-    parse_param = [vocab, action_list_sorted_no_reverse, tokenize_fn]
+    parse_param = [vocabulary, action_list_sorted_no_reverse, tokenize_fn]
 
     df_data = parse_fn(df, 'train', *parse_param)
     df = df.loc[df_data[0].index.values]
