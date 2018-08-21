@@ -1129,3 +1129,110 @@ def add_pid_to_file_path(file_path):
     pid = str(os.getpid())
     file_path = file_name + '_' + pid + ext
     return file_path
+
+
+def create_random_action(ac_code_list):
+    from common.action_constants import ActionType
+    random_delete = random.randint(0, len(ac_code_list) - 1)
+    actions = [{'act_type': ActionType.DELETE, 'from_char': ac_code_list[random_delete],
+                'to_char': '', 'token_pos': random_delete}]
+    return actions
+
+
+def retokenize_error_code(error_code_names_list, tokenize_fn):
+    new_error_code_names_list = []
+    for error_code_list in error_code_names_list:
+        err_code = ' '.join(error_code_list)
+        tokens = tokenize_fn(err_code)
+        one_error_tokens = [tok.value for tok in tokens]
+        new_error_code_names_list += [one_error_tokens]
+    return new_error_code_names_list
+
+
+def save_addition_data(original_states, states, tokenize_fn, batch_size, file_path, target_file_path, vocabulary=None,
+                       max_distande=None, only_error=False):
+    from common.reinforcement_generate_util import generate_action_between_two_code
+    save_data_dict = {'ac_code': [], 'action_character_list': [], 'includes': [],
+                      'error_count': [], 'distance': [], 'id': []}
+
+    ac_code_names_list = original_states['input_seq_name']
+    error_code_ids_list = [c[1:l - 1] for c, l in zip(states['input_seq'], states['copy_length'])]
+    error_code_names_list = states['input_seq_name']
+
+    for ids, c in zip(error_code_ids_list, states['copy_length']):
+        for p in ids:
+            if p > 5941:
+                a = 1
+
+    error_code_names_list = retokenize_error_code(error_code_names_list, tokenize_fn)
+
+    do_compile_check = True
+    if do_compile_check:
+        compile_list = ac_code_names_list + error_code_names_list
+        continue_list = [True for _ in range(len(compile_list))]
+        last_res_list = [False for _ in range(len(compile_list))]
+        include_list = original_states['includes'] + original_states['includes']
+
+        _, compile_res_list = compile_code_ids_list(compile_list, continue_list, last_res_list,
+                                                    vocabulary=vocabulary,
+                                                    includes_list=include_list, file_path=file_path,
+                                                    target_file_path=target_file_path, do_compile_pool=True,
+                                                    need_transform=False)
+        ac_res_list = compile_res_list[:len(ac_code_names_list)]
+        error_res_list = compile_res_list[len(ac_code_names_list):]
+    else:
+        ac_res_list = [True for _ in range(len(ac_code_names_list))]
+        error_res_list = [False for _ in range(len(ac_code_names_list))]
+
+    pool = get_compile_pool()
+    max_distance_list = [None for _ in range(batch_size)]
+    generate_args = list(zip(error_code_names_list, ac_code_names_list, max_distance_list))
+    generate_result = list(pool.starmap(generate_action_between_two_code, generate_args))
+    # generate_result = list(itertools.starmap(generate_action_between_two_code, generate_args))
+    distance_list, action_list = list(zip(*generate_result))
+    a = 1
+
+    for ac_code_list, inc, prog_id, ac_res, err_res, actions, dis \
+            in zip(ac_code_names_list, original_states['includes'], original_states['id'],
+                   ac_res_list, error_res_list, action_list, distance_list):
+        if dis < 0:
+            continue
+        if max_distande is not None and dis > max_distande:
+            continue
+
+        if only_error and err_res:
+            continue
+
+        # if 0 > dis or dis >= max_generate_distance:
+        #     continue
+
+        ac_code = ' '.join(ac_code_list)
+        if len(actions) == 0:
+            actions = create_random_action(ac_code_list)
+        save_data_dict['ac_code'] += [ac_code]
+        save_data_dict['action_character_list'] += [actions]
+        save_data_dict['includes'] += [inc]
+        save_data_dict['error_count'] += [dis]
+        save_data_dict['distance'] += [dis]
+        save_data_dict['id'] += [prog_id]
+    return save_data_dict
+
+
+def create_special_tokens_ids(keyword_vocab, has_delimiter=False):
+    keyword_ids = create_effect_keyword_ids_set(keyword_vocab)
+    special_tokens = []
+    special_tokens += keyword_vocab.begin_tokens
+    special_tokens += keyword_vocab.end_tokens
+    special_tokens += [keyword_vocab.unk]
+    special_tokens += keyword_vocab.addition_tokens
+    if has_delimiter:
+        special_tokens += ['<Delimiter>']
+    special_ids = set([keyword_vocab.word_to_id(t) for t in special_tokens])
+
+    total_ids = keyword_ids | special_ids
+    return total_ids
+
+
+def create_special_token_mask_list(total_ids, vocabulary_size):
+    mask = [1 if i in total_ids else 0 for i in range(vocabulary_size)]
+    return mask

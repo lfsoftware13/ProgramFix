@@ -16,7 +16,8 @@ from common.logger import init_a_file_logger, info
 from common.problem_util import to_cuda
 from common.reinforcement_generate_util import GenerateEnvironment, create_generate_env, create_generate_agent, \
     generate_action_between_two_code
-from common.util import data_loader, compile_code_ids_list, add_pid_to_file_path
+from common.util import data_loader, compile_code_ids_list, add_pid_to_file_path, create_random_action, \
+    retokenize_error_code, save_addition_data
 import torch.functional as F
 
 from database.database_util import create_table, insert_items
@@ -211,7 +212,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
 
                     model_output = model.forward(*model_input, do_sample=True, do_beam_search=do_beam_search)
 
-                    input_data, final_output, output_records, final_output_name_list = create_multi_step_next_input_batch_fn(input_data,
+                    input_data, final_output, output_records, final_output_name_list, continue_list = create_multi_step_next_input_batch_fn(input_data,
                                                                                                      model_input,
                                                                                                      model_output,
                                                                                                      continue_list,
@@ -252,7 +253,6 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
 def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch_data_fn, parse_target_batch_data_fn,
              do_sample=False, print_output=False, create_output_ids_fn=None, evaluate_obj_list=[],
              expand_output_and_target_fn=None, add_data_record_fn=None, db_path='', table_name=''):
-    # total_loss = to_cuda(torch.Tensor([0]))
     total_batch = to_cuda(torch.Tensor([0]))
     saved_count = 0
     steps = 1
@@ -426,97 +426,11 @@ def train_generate_model(generate_agent, generate_env: GenerateEnvironment, pars
         info(loss_info)
 
         if save_data_fn is not None:
-            save_list = env_info['save_list']
-            ac_action_pos = env_info['ac_action_pos']
-            effect_sample_output_list_length = env_info['effect_sample_output_list_length']
-
-            ac_code_ids_list = [c[1:-1] for c in original_states['input_seq']]
-            ac_code_names_list = original_states['input_seq_name']
-            error_code_ids_list = [c[1:l-1] for c, l in zip(states['input_seq'], states['copy_length'])]
-            error_code_names_list = states['input_seq_name']
-
-            for ids, c in zip(error_code_ids_list, states['copy_length']):
-                for p in ids:
-                    if p > 5941:
-                        a = 1
-
-            new_error_code_names_list = []
-            for error_code_list in error_code_names_list:
-                err_code = ' '.join(error_code_list)
-                tokens = tokenize_fn(err_code)
-                one_error_tokens = [tok.value for tok in tokens]
-                new_error_code_names_list += [one_error_tokens]
-            error_code_names_list = new_error_code_names_list
-
-            do_compile_check = True
-            if do_compile_check:
-                compile_list = ac_code_names_list + error_code_names_list
-                continue_list = [True for _ in range(len(compile_list))]
-                last_res_list = [False for _ in range(len(compile_list))]
-                include_list = original_states['includes'] + original_states['includes']
-
-                _, compile_res_list = compile_code_ids_list(compile_list, continue_list, last_res_list,
-                                                       vocabulary=vocabulary,
-                                                       includes_list=include_list, file_path=file_path,
-                                                       target_file_path=target_file_path, do_compile_pool=True,
-                                                            need_transform=False)
-                ac_res_list = compile_res_list[:len(ac_code_names_list)]
-                error_res_list = compile_res_list[len(ac_code_names_list):]
-            else:
-                ac_res_list = [True for _ in range(len(ac_code_names_list))]
-                error_res_list = [False for _ in range(len(ac_code_names_list))]
-
-            pool = get_compile_pool()
-            max_distance_list = [None for _ in range(batch_size)]
-            generate_args = list(zip(error_code_names_list, ac_code_names_list, max_distance_list))
-            generate_result = list(pool.starmap(generate_action_between_two_code, generate_args))
-            # generate_result = list(itertools.starmap(generate_action_between_two_code, generate_args))
-            distance_list, action_list = list(zip(*generate_result))
-
-            for ac_code_list, error_code_ids, inc, save, prog_id, ac_pos, sample_len, ac_res, err_res, actions, dis \
-                    in zip(ac_code_names_list, error_code_ids_list, original_states['includes'], save_list,
-                           original_states['id'], ac_action_pos, effect_sample_output_list_length,
-                           ac_res_list, error_res_list, action_list, distance_list):
-                # if save:
-                # ac_code_ids = ac_code_ids[1:-1]
-                # error_code_ids = error_code_ids[1:-1]
-
-                if (not ac_res) or err_res:
-                    # continue
-                    pass
-
-                # ac_code_list = [vocabulary.id_to_word(c) for c in ac_code_ids]
-                # error_code_list = [vocabulary.id_to_word(c) for c in error_code_ids]
-
-                # part_ac_code_list = ac_code_ids[ac_pos[0] + 1: ac_pos[1]]
-                # part_err_code_list = error_code_ids[ac_pos[0] + 1: ac_pos[0]+sample_len+1]
-                # dis, action_list = generate_action_between_two_code(error_code_list, ac_code_list,
-                #                                                     max_distance=max_generate_distance,
-                #                                                     get_value=lambda x: x)
-                # dis, part_action_list = generate_action_between_two_code(part_err_code_list, part_ac_code_list,
-                #                                                     max_distance=max_generate_distance,
-                #                                                     get_value=lambda x: x)
-                # for a in actions:
-                #     # a['token_pos'] = a['token_pos'] + ac_pos[0] + 1
-                #     a['from_char'] = vocabulary.id_to_word(a['from_char']) if a['from_char'] != '' else ''
-                #     a['to_char'] = vocabulary.id_to_word(a['to_char']) if a['to_char'] != '' else ''
-                action_list = actions
-                # if 0 > dis or dis >= max_generate_distance:
-                #     continue
-
-                ac_code = ' '.join(ac_code_list)
-                # err_code = ' '.join(error_code_list)
-                save_data_dict['ac_code'] += [ac_code]
-                if len(action_list) == 0:
-                    from common.action_constants import ActionType
-                    random_delete = random.randint(0, len(ac_code_list)-1)
-                    action_list = [{'act_type': ActionType.DELETE, 'from_char': ac_code_list[random_delete],
-                                    'to_char': '', 'token_pos': random_delete}]
-                save_data_dict['action_character_list'] += [action_list]
-                save_data_dict['includes'] += [inc]
-                save_data_dict['error_count'] += [dis]
-                save_data_dict['distance'] += [dis]
-                save_data_dict['id'] += [prog_id]
+            save_res_dict = save_addition_data(original_states=original_states, states=states, tokenize_fn=tokenize_fn,
+                                          batch_size=batch_size, file_path=file_path, target_file_path=target_file_path,
+                                               vocabulary=vocabulary)
+            for k, v in save_res_dict.items():
+                save_data_dict[k] = save_data_dict.get(k, []) + v
 
         steps += 1
         total_batch += batch_size

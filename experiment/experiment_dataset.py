@@ -136,6 +136,7 @@ class IterateErrorDataSet(CustomerDataSet):
             sample['input_seq'] = row['error_token_id_list']
             sample['input_seq_name'] = row['error_token_name_list'][1:-1]
             sample['input_length'] = len(sample['input_seq'])
+        sample['copy_length'] = sample['input_length']
 
         inner_begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[1])
         inner_end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[1])
@@ -146,7 +147,6 @@ class IterateErrorDataSet(CustomerDataSet):
             if not self.is_flatten:
                 sample['is_copy_target'] = [one + [0] for one in row['is_copy_list']]
                 sample['copy_target'] = [one + [-1] for one in row['copy_pos_list']]
-                sample['copy_length'] = sample['input_length']
 
                 sample['sample_target'] = [one + [inner_end_id] for one in row['sample_ac_id_list']]
                 sample['sample_outputs_length'] = [len(ids) for ids in sample['sample_target']]
@@ -168,7 +168,6 @@ class IterateErrorDataSet(CustomerDataSet):
 
                 sample['is_copy_target'] = row['is_copy_list'] + [0]
                 sample['copy_target'] = row['copy_pos_list'] + [-1]
-                sample['copy_length'] = sample['input_length']
 
                 sample_mask = sorted(row['sample_mask_list'] + [inner_end_id])
                 sample_mask_dict = {v: i for i, v in enumerate(sample_mask)}
@@ -247,7 +246,8 @@ class CombineNodeIterateErrorDataSet(CustomerDataSet):
                  MAX_LENGTH=500,
                  use_ast=False,
                  do_multi_step_sample=False,
-                 id_to_program_dict=None):
+                 id_to_program_dict=None,
+                 no_id_to_program_dict=False):
         # super().__init__(data_df, vocabulary, set_type, transform, no_filter)
         self.set_type = set_type
         self.vocabulary = vocabulary
@@ -257,6 +257,8 @@ class CombineNodeIterateErrorDataSet(CustomerDataSet):
         self.use_ast = use_ast
         self.transform = False
         self.id_to_program_dict = id_to_program_dict
+        if no_id_to_program_dict:
+            self.id_to_program_dict = None
         # if self.set_type != 'valid' and self.set_type != 'test' and self.set_type != 'deepfix':
         #     self.do_sample = False
         # else:
@@ -272,6 +274,9 @@ class CombineNodeIterateErrorDataSet(CustomerDataSet):
                 self.id_to_program_dict = {i: prog_id for i, prog_id in enumerate(sorted(data_df['id']))}
             else:
                 self.id_to_program_dict = id_to_program_dict
+            if no_id_to_program_dict:
+                self.id_to_program_dict = None
+            self.only_first = do_multi_step_sample
             self._samples = [FlattenRandomIterateRecords(row, is_flatten=do_flatten, only_first=do_multi_step_sample)
                              for i, row in self.data_df.iterrows()]
             # c = 0
@@ -350,9 +355,12 @@ class CombineNodeIterateErrorDataSet(CustomerDataSet):
 
         return df
 
+    def set_only_first(self, only_first):
+        self.only_first = only_first
+
     def _get_raw_sample(self, row):
         # sample = dict(row)
-        row.select_random_i()
+        row.select_random_i(only_first=self.only_first)
         sample = {}
         sample['id'] = row['id']
         sample['includes'] = row['includes']
@@ -392,6 +400,7 @@ class CombineNodeIterateErrorDataSet(CustomerDataSet):
             sample['full_output_target'] = row['target_ac_token_id_list'][1:-1]
 
             sample['final_output'] = row['ac_code_ids']
+            sample['final_output_name'] = row['ac_code_name_with_labels'][1:-1]
             sample['p1_target'] = row['error_pos_list'][0]
             sample['p2_target'] = row['error_pos_list'][1]
             sample['error_pos_list'] = row['error_pos_list']
@@ -437,13 +446,20 @@ class CombineNodeIterateErrorDataSet(CustomerDataSet):
         return d
 
     def __getitem__(self, index):
-        prog_id = self.id_to_program_dict[index]
-        real_position = self.program_to_position_dict[prog_id]
-        return self._get_raw_sample(self._samples[real_position])
+        if self.id_to_program_dict is not None:
+            prog_id = self.id_to_program_dict[index]
+            real_position = self.program_to_position_dict[prog_id]
+        else:
+            real_position = index
+        row = self._samples[real_position]
+        return self._get_raw_sample(row)
 
     def __setitem__(self, key, value):
-        prog_id = self.id_to_program_dict[key]
-        real_position = self.program_to_position_dict[prog_id]
+        if self.id_to_program_dict is not None:
+            prog_id = self.id_to_program_dict[key]
+            real_position = self.program_to_position_dict[prog_id]
+        else:
+            real_position = key
         self._samples[real_position] = value
 
     def __len__(self):
@@ -519,12 +535,12 @@ class FlattenRandomIterateRecords:
             return self.row[item][self.random_i]
         return self.row[item]
 
-    def select_random_i(self):
-        if self.only_first:
+    def select_random_i(self, only_first=None):
+        if (only_first is not None and only_first) or \
+                (only_first is None and self.only_first):
             self.random_i = 0
         # self.random_i = random.randint(0, self.iterate_num - 1)
         self.random_i = 0
-
 
 
 def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
@@ -602,13 +618,14 @@ def load_deepfix_ac_code_for_generate_dataset(is_debug, vocabulary, mask_transfo
 
 def load_addition_generate_iterate_solver_train_dataset_fn(vocabulary, mask_transformer, do_flatten=False,
                                                         use_ast=False, do_multi_step_sample=False):
-    def load_addition_generate_iterate_solver_train_dataset(df, id_to_prog_dict):
+    def load_addition_generate_iterate_solver_train_dataset(df, id_to_prog_dict, no_id_to_program_dict=False):
         df_dict = load_generate_code_for_solver_model_iterate_data(df, convert_field_fn=None, convert_field_dict={},
                                                          do_flatten=False, vocabulary=vocabulary)
         addition_dataset = CombineNodeIterateErrorDataSet(pd.DataFrame(df_dict), vocabulary, 'generate',
                                                transformer_vocab_slk=mask_transformer, do_flatten=False,
                                                use_ast=use_ast, do_multi_step_sample=do_multi_step_sample,
-                                                          id_to_program_dict=id_to_prog_dict)
+                                                          id_to_program_dict=id_to_prog_dict,
+                                                          no_id_to_program_dict=no_id_to_program_dict)
         return addition_dataset
     return load_addition_generate_iterate_solver_train_dataset
 

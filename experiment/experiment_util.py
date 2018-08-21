@@ -354,21 +354,24 @@ def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False):
                   'distance': train['distance'], 'ac_code_ids': train_data[5],
                   'is_copy_list': train_data[6], 'copy_pos_list': train_data[7], 'sample_mask_list': train_data[8],
                   'error_token_name_list': train_data[9], 'id': train['id'],
-                  'target_ac_token_id_list': train_data[10]}
+                  'target_ac_token_id_list': train_data[10],
+                  'ac_code_name_with_labels': train_data[11]}
     valid_dict = {'error_token_id_list': valid_data[0], 'sample_error_id_list': valid_data[1],
                   'sample_ac_id_list': valid_data[2], 'ac_pos_list': valid_data[3],
                   'error_pos_list': valid_data[4], 'includes': valid['includes'],
                   'distance': valid['distance'], 'ac_code_ids': valid_data[5],
                   'is_copy_list': valid_data[6], 'copy_pos_list': valid_data[7], 'sample_mask_list': valid_data[8],
                   'error_token_name_list': valid_data[9], 'id': valid['id'],
-                  'target_ac_token_id_list': valid_data[10]}
+                  'target_ac_token_id_list': valid_data[10],
+                  'ac_code_name_with_labels': valid_data[11]}
     test_dict = {'error_token_id_list': test_data[0], 'sample_error_id_list': test_data[1],
-                  'sample_ac_id_list': test_data[2], 'ac_pos_list': test_data[3],
-                  'error_pos_list': test_data[4], 'includes': test['includes'],
-                  'distance': test['distance'], 'ac_code_ids': test_data[5],
+                 'sample_ac_id_list': test_data[2], 'ac_pos_list': test_data[3],
+                 'error_pos_list': test_data[4], 'includes': test['includes'],
+                 'distance': test['distance'], 'ac_code_ids': test_data[5],
                  'is_copy_list': test_data[6], 'copy_pos_list': test_data[7], 'sample_mask_list': test_data[8],
                  'error_token_name_list': test_data[9], 'id': test['id'],
-                 'target_ac_token_id_list': test_data[10]}
+                 'target_ac_token_id_list': test_data[10],
+                 'ac_code_name_with_labels': test_data[11]}
 
     if do_flatten:
         train_dict = flatten_iterative_data(train_dict)
@@ -466,7 +469,8 @@ def load_generate_code_for_solver_model_iterate_data(df, convert_field_fn=None, 
                   'distance': df['distance'], 'ac_code_ids': df_data[5],
                   'is_copy_list': df_data[6], 'copy_pos_list': df_data[7], 'sample_mask_list': df_data[8],
                   'error_token_name_list': df_data[9], 'id': df['id'],
-               'target_ac_token_id_list': df_data[10]}
+               'target_ac_token_id_list': df_data[10],
+               'ac_code_name_with_labels': df_data[11], }
 
     if do_flatten:
         df_dict = flatten_iterative_data(df_dict)

@@ -2,6 +2,7 @@ import os
 import random
 
 import torch
+import pandas as pd
 
 from torch import nn, optim
 from tqdm import tqdm
@@ -10,15 +11,18 @@ from common import torch_util, problem_util, util
 from common.evaluate_util import CompileResultEvaluate
 from common.logger import init_a_file_logger, info
 from common.problem_util import to_cuda
-from common.util import data_loader, compile_code_ids_list, add_pid_to_file_path
+from common.util import data_loader, compile_code_ids_list, add_pid_to_file_path, save_addition_data, \
+    create_special_tokens_ids, create_special_token_mask_list
 import torch.functional as F
 
 from database.database_util import create_table, insert_items
+from experiment.experiment_dataset import IterateErrorDataSet
 
 IGNORE_TOKEN = -1
 
 
-def get_model(model_fn, model_params, path, load_previous=False, parallel=False, gpu_index=None):
+def get_model(model_fn, model_params, path, load_previous=False, parallel=False, gpu_index=None,
+              random_embedding=False, vocabulary=None, has_delimiter=False):
     m = model_fn(
         **model_params
     )
@@ -30,13 +34,20 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
+        torch_util.load_model(m, path, map_location={'cuda:0': 'cuda:1'})
         # torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
         print("create new model")
     if gpu_index is None and not parallel:
         m = m.module.cpu()
+    if random_embedding:
+        special_ids = create_special_tokens_ids(vocabulary, has_delimiter=has_delimiter)
+        mask_list = create_special_token_mask_list(special_ids, vocabulary.vocabulary_size)
+        embedding_mask = torch.ByteTensor(mask_list).to(m.module.embedding.weight.device)
+        random_tensor = torch.rand(m.module.embedding.weight.size()).to(m.module.embedding.weight.device)
+        m.module.embedding.weight.data = torch.where(torch.unsqueeze(embedding_mask, dim=1),
+                                                     m.module.embedding.weight, random_tensor)
     return m
 
 
@@ -176,7 +187,8 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
              do_sample=False, print_output=False, create_output_ids_fn=None, evaluate_obj_list=[],
              expand_output_and_target_fn=None, max_step_times=0, vocabulary=None, file_path='',
                         create_multi_step_next_input_batch_fn=None, extract_includes_fn=lambda x: x['includes'],
-                        print_output_fn=None, do_beam_search=False, target_file_path='main.out'):
+                        print_output_fn=None, do_beam_search=False, target_file_path='main.out', do_save_data=False,
+                        max_save_distance=None):
     total_loss = to_cuda(torch.Tensor([0]))
     total_batch = to_cuda(torch.Tensor([0]))
     steps = 0
@@ -186,6 +198,10 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
         o.clear_result()
 
     model.eval()
+
+    from common.pycparser_util import tokenize_by_clex_fn
+    tokenize_fn = tokenize_by_clex_fn()
+    save_data_dict = {}
 
     # file_path = add_pid_to_file_path(file_path)
     # target_file_path = add_pid_to_file_path(target_file_path)
@@ -207,7 +223,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
 
                     model_output = model.forward(*model_input, do_sample=True, do_beam_search=do_beam_search)
 
-                    input_data, final_output, output_records, final_output_name_list = create_multi_step_next_input_batch_fn(input_data,
+                    input_data, final_output, output_records, final_output_name_list, continue_list = create_multi_step_next_input_batch_fn(input_data,
                                                                                                      model_input,
                                                                                                      model_output,
                                                                                                      continue_list,
@@ -223,6 +239,18 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                     if sum(continue_list) == 0:
                         break
 
+                if do_save_data:
+                    batch_data['input_seq_name'] = batch_data['final_output_name']
+                    save_res_dict = save_addition_data(original_states=batch_data, states=input_data,
+                                                       tokenize_fn=tokenize_fn,
+                                                       batch_size=batch_size, file_path=file_path,
+                                                       target_file_path=target_file_path,
+                                                       vocabulary=vocabulary,
+                                                       max_distande=max_save_distance,
+                                                       only_error=True)
+                    for k, v in save_res_dict.items():
+                        save_data_dict[k] = save_data_dict.get(k, []) + v
+
                 step_output = 'in evaluate step {}: '.format(steps)
                 res = compile_evaluator.add_result(result_list)
                 step_output += res
@@ -233,7 +261,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                 # print(step_output)
                 info(step_output)
 
-                if print_output and steps % 10 == 0:
+                if print_output and steps % 1 == 0:
                     print_output_fn(output_records=output_records_list, final_output=final_output_list, batch_data=batch_data,
                                     step_i=steps, vocabulary=vocabulary, compile_result_list=result_records_list)
 
@@ -242,7 +270,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                 pbar.update(batch_size)
     evaluate_obj_list = [compile_evaluator] + evaluate_obj_list
 
-    return evaluate_obj_list, (total_loss / steps).item()
+    return evaluate_obj_list, (total_loss / steps).item(), save_data_dict
 
 
 def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch_data_fn, parse_target_batch_data_fn,
@@ -371,7 +399,9 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        max_step_times=1, compile_file_path=None, do_multi_step_sample_evaluate=False,
                        create_multi_step_next_input_batch_fn=None, extract_includes_fn=None,
                        multi_step_sample_evaluator=[], vocabulary=None,
-                       do_beam_search=False, target_file_path='main.out'):
+                       do_beam_search=False, target_file_path='main.out',
+                       load_addition_generate_iterate_solver_train_dataset_fn=None,
+                       max_save_distance=None, addition_step=1):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -457,7 +487,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
             return
 
         if do_multi_step_sample_evaluate:
-            multi_step_test_evalutor, sample_test_loss = multi_step_evaluate(model=model, dataset=test_dataset,
+            multi_step_test_evalutor, sample_test_loss, _ = multi_step_evaluate(model=model, dataset=test_dataset,
                                                               batch_size=batch_size, do_sample=True,
                                                               print_output=print_output,
                                                               parse_input_batch_data_fn=parse_input_batch_data_fn,
@@ -471,7 +501,8 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                                              create_multi_step_next_input_batch_fn = create_multi_step_next_input_batch_fn,
                                                                              print_output_fn=print_output_fn,
                                                                              do_beam_search=do_beam_search,
-                                                                             target_file_path=target_file_path)
+                                                                             target_file_path=target_file_path,
+                                                                                do_save_data=False)
             print('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             info('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             for evaluator in multi_step_test_evalutor:
@@ -515,31 +546,46 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
     for epoch in range(start_epoch, start_epoch+epoches):
         print('----------------------- in epoch {} --------------------'.format(epoch))
         combine_train_set = train_dataset
-        if addition_train:
-            pass
-            # addition_predict_dataset = train_dataset
-            # if addition_dataset is not None:
-            #     addition_predict_radio = addition_epoch_ratio/(addition_epoch_ratio+1)
-            #     addition_predict_dataset = addition_predict_dataset.combine_dataset(addition_dataset)
-            # else:
-            #     addition_predict_radio = addition_epoch_ratio
-            # records = sample_better_output(model=model, dataset=addition_predict_dataset, batch_size=batch_size,
-            #                                vocab=vocabulary, do_sample=True, epoch_ratio=addition_predict_radio,
-            #                                add_value_mask=add_value_mask)
-            #
-            # addition_dict = create_addition_error_data(records)
-            # if addition_dataset is None:
-            #     addition_dataset = CCodeErrorDataSet(pd.DataFrame(addition_dict), vocabulary, 'addition_train',
-            #                                          transformer_vocab_slk=mask_transformer)
-            # else:
-            #     addition_dataset.remain_samples(frac=addition_train_remain_frac)
-            #     addition_dataset.add_samples(pd.DataFrame(addition_dict).sample(frac=1 - addition_train_remain_frac))
-            # info_output = "In epoch {}, there are {} parsed data in the {} dataset".format(epoch, len(addition_dataset), 'addition_train')
-            # print(info_output)
-            # combine_train_set = combine_train_set.combine_dataset(addition_dataset)
+        if addition_train and epoch % addition_step == 0:
+            original_only_first = train_dataset.only_first
+            train_dataset.set_only_first(True)
+            multi_step_test_evalutor, sample_test_loss, save_data_dict = multi_step_evaluate(model=model, dataset=train_dataset,
+                                                                                batch_size=batch_size, do_sample=True,
+                                                                                print_output=print_output,
+                                                                                parse_input_batch_data_fn=parse_input_batch_data_fn,
+                                                                                parse_target_batch_data_fn=parse_target_batch_data_fn,
+                                                                                create_output_ids_fn=create_output_ids_fn,
+                                                                                evaluate_obj_list=multi_step_sample_evaluator,
+                                                                                expand_output_and_target_fn=expand_output_and_target_fn,
+                                                                                extract_includes_fn=extract_includes_fn,
+                                                                                vocabulary=vocabulary,
+                                                                                file_path=compile_file_path,
+                                                                                max_step_times=max_step_times,
+                                                                                create_multi_step_next_input_batch_fn=create_multi_step_next_input_batch_fn,
+                                                                                print_output_fn=print_output_fn,
+                                                                                do_beam_search=do_beam_search,
+                                                                                target_file_path=target_file_path,
+                                                                                do_save_data=True,
+                                                                                             max_save_distance=None)
+            print('addition train sample test loss: {}, evaluator : '.format(sample_test_loss))
+            info('addition train sample test loss: {}, evaluator : '.format(sample_test_loss))
+            for evaluator in multi_step_test_evalutor:
+                print(evaluator)
+                info(evaluator)
+            train_dataset.set_only_first(original_only_first)
+
+            save_data_df = pd.DataFrame(save_data_dict)
+            addition_save_dataset = load_addition_generate_iterate_solver_train_dataset_fn(save_data_df, id_to_prog_dict=None,
+                                                                                           no_id_to_program_dict=True)
+            combine_train_set = train_dataset + addition_save_dataset
+
+            info_output = "In epoch {}, there are {} parsed data in the {} dataset".format(epoch, len(addition_save_dataset), 'addition_train')
+            print(info_output)
+            info(info_output)
 
         if ac_copy_train:
-            combine_train_set = combine_train_set.combine_dataset(ac_copy_dataset.remain_dataset(frac=ac_copy_radio))
+            # combine_train_set = combine_train_set.combine_dataset(ac_copy_dataset.remain_dataset(frac=ac_copy_radio))
+            pass
 
         train_evaluator, train_loss = train(model=model, dataset=combine_train_set, batch_size=batch_size,
                                             loss_function=train_loss_fn, optimizer=optimizer, clip_norm=clip_norm,
@@ -590,6 +636,10 @@ if __name__ == '__main__':
     torch.manual_seed(100)
     torch.cuda.manual_seed_all(100)
     random.seed(100)
+
+    import sys
+
+    sys.setrecursionlimit(5000)
 
     def boolean_string(s):
         if s not in {'False', 'True'}:
@@ -644,6 +694,9 @@ if __name__ == '__main__':
     create_output_ids_fn = p_config['create_output_ids_fn']
     vocabulary = p_config['vocabulary']
 
+    load_addition_generate_iterate_solver_train_dataset_fn = p_config['load_addition_generate_iterate_solver_train_dataset_fn']
+    addition_train = p_config.get('addition_train', False)
+
     do_multi_step_sample_evaluate = p_config['do_multi_step_sample_evaluate']
     max_step_times = p_config['max_step_times']
     create_multi_step_next_input_batch_fn = p_config['create_multi_step_next_input_batch_fn']
@@ -653,7 +706,13 @@ if __name__ == '__main__':
     print_output = p_config['print_output']
     print_output_fn = p_config['print_output_fn']
 
+    max_save_distance = p_config.get('max_save_distance', None)
+    addition_step = p_config.get('addition_step', 1)
+
     do_beam_search = p_config.get('do_beam_search', False)
+
+    random_embedding = p_config.get('random_embedding', False)
+    use_ast = p_config.get('use_ast', False)
 
     model_path = os.path.join(save_root_path, p_config['load_model_name'])
     model = get_model(
@@ -662,7 +721,10 @@ if __name__ == '__main__':
         model_path,
         load_previous=load_previous,
         parallel=problem_util.Parallel,
-        gpu_index=problem_util.GPU_INDEX
+        gpu_index=problem_util.GPU_INDEX,
+        vocabulary=vocabulary,
+        random_embedding=random_embedding,
+        has_delimiter=use_ast
     )
 
     train_data, val_data, test_data, ac_copy_data = p_config.get("data")
@@ -681,14 +743,16 @@ if __name__ == '__main__':
                        load_previous=load_previous, is_debug=is_debug, epoch_ratio=epoch_ratio, clip_norm=clip_norm, start_epoch=start_epoch,
                        do_sample_evaluate=do_sample_evaluate, print_output=print_output, print_output_fn=print_output_fn,
                        ac_copy_train=ac_copy_train, ac_copy_radio=ac_copy_radio,
-                       addition_train=False, addition_train_remain_frac=1.0, addition_epoch_ratio=0.4,
+                       addition_train=addition_train, addition_train_remain_frac=1.0, addition_epoch_ratio=0.4,
                        max_step_times=max_step_times, compile_file_path=compile_file_path, do_multi_step_sample_evaluate=do_multi_step_sample_evaluate,
                        expand_output_and_target_fn=expand_output_and_target_fn,
                        do_sample_and_save=do_sample_and_save, add_data_record_fn=add_data_record_fn, db_path=db_path,
                        table_basename=table_basename, vocabulary=vocabulary,
                        create_multi_step_next_input_batch_fn=create_multi_step_next_input_batch_fn,
                        extract_includes_fn=extract_includes_fn,
-                       do_beam_search=do_beam_search, target_file_path=target_file_path)
+                       do_beam_search=do_beam_search, target_file_path=target_file_path,
+                       load_addition_generate_iterate_solver_train_dataset_fn=load_addition_generate_iterate_solver_train_dataset_fn,
+                       max_save_distance=max_save_distance, addition_step=addition_step)
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)

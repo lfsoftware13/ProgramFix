@@ -404,7 +404,8 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
 
     return df['token_id_list'], df['sample_error_id_list'], df['sample_ac_id_list'], df['ac_pos_list'], \
            df['error_pos_list'], df['ac_code_id_with_labels'], df['is_copy_list'], df['copy_pos_list'], \
-           df['sample_mask_list'], df['token_name_list'], df['target_ac_token_id_list'], df['ac_code_name_with_labels']
+           df['sample_mask_list'], df['token_name_list'], df['target_ac_token_id_list'], \
+           df['ac_code_name_with_labels']
 
 
 def check_multi_action(token_names_list, tokenize_fn):

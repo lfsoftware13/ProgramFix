@@ -695,6 +695,13 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
                                                                 do_sample=True, direct_output=direct_output)
         p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = output_record_list
 
+        cur_error_position_data = torch.ge(p1, p2).tolist()
+        for i, err in enumerate(cur_error_position_data):
+            if err == 1:
+                continue_list[i] = False
+
+        original_input_data = input_data.copy()
+
         sample_output_ids_list = sample_output_ids.tolist()
         effect_sample_output_list = []
         for sample in sample_output_ids_list:
@@ -725,10 +732,9 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
             final_output_name_list += [new_code_name_list]
 
         next_input = [[begin_id] + one + [end_id] for one in final_output]
-        next_input = [next_inp if con else ori_inp for ori_inp, next_inp, con in
-                      zip(input_seq, next_input, continue_list)]
+        # next_input = [next_inp if con else ori_inp for ori_inp, next_inp, con in
+        #               zip(input_seq, next_input, continue_list)]
         next_input_len = [len(one) for one in next_input]
-        final_output = [next_inp[1:-1] for next_inp in next_input]
 
         input_data['input_seq'] = next_input
         input_data['input_length'] = next_input_len
@@ -742,7 +748,12 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
             input_data['input_seq'] = input_seq
             input_data['adj'] = adj
             input_data['input_length'] = input_length
-        return input_data, final_output, output_record_list, final_output_name_list
+
+        for k in input_data.keys():
+            input_data[k] = [i if c else o for o, i, c in zip(original_input_data[k], input_data[k], continue_list)]
+
+        final_output = [next_inp[1:-1] for next_inp in input_data['input_seq']]
+        return input_data, final_output, output_record_list, input_data['input_seq_name'], continue_list
 
     def parse_ast_node(input_seq_name):
         # input_seq_name = [vocabulary.id_to_word(token_id) for token_id in one_final_output]

@@ -21,8 +21,12 @@ from experiment.experiment_util import convert_action_map_to_old_action
 
 
 def generate_action_between_two_code(error_tokens, ac_tokens, max_distance=None, get_value=lambda x: x):
-    distance, action_list = calculate_distance_and_action_between_two_code(error_tokens, ac_tokens,
+    try:
+        distance, action_list = calculate_distance_and_action_between_two_code(error_tokens, ac_tokens,
                                                                       max_distance=max_distance, get_value=get_value)
+    except Exception as e:
+        distance = -1
+        action_list = None
     if max_distance is not None and distance > max_distance:
         distance = -1
         action_list = None
@@ -435,29 +439,6 @@ def all_output_and_target_evaluate_fn(ignore_token):
     return all_output_and_target_evaluate
 
 
-# def deal_with_reward_fn(s_model, parse_input_batch_data_fn, g_create_next_input_batch_fn, s_create_next_input_batch_fn,
-#                         compile_code_ids_fn, vocabulary, extract_includes_fn, file_path, target_file_path,
-#                         create_reward_by_compile_fn):
-#     def deal_with_reward(states, state_tensor, actions):
-#         batch_data, output_ids, _ = g_create_next_input_batch_fn(states, state_tensor, actions)
-#         model_input = parse_input_batch_data_fn(batch_data, do_sample=True)
-#         model_output = s_model.forward(*model_input, do_sample=True)
-#         input_data, final_output, output_records = s_create_next_input_batch_fn(states, model_input, model_output, )
-#
-#         batch_size = model_input.shape[0]
-#         continue_list = [True for _ in range(batch_size)]
-#         result_list = [False for _ in range(batch_size)]
-#         _, result_list = compile_code_ids_fn(final_output, continue_list, result_list,
-#                                                            vocabulary=vocabulary,
-#                                                            includes_list=extract_includes_fn(input_data),
-#                                                            file_path=file_path,
-#                                                            target_file_path=target_file_path)
-#         reward_list, done_list = create_reward_by_compile_fn(result_list, states, actions)
-#         save_list = [rew > 0 for rew in reward_list]
-#
-#         return reward_list, done_list, save_list, output_ids
-#     return deal_with_reward
-
 count = 0
 # generate_action_pool = mp.Pool(num_processes)
 class GenerateEnvironment(gym.Env):
@@ -512,8 +493,19 @@ class GenerateEnvironment(gym.Env):
             # create error code by generate output
             # for i in range(len(self.step_action_list)):
             ori_states = states.copy()
-            batch_data, output_ids, effect_sample_output_list_length = self.preprocess_next_input_for_solver_fn(states, states_tensor, actions)
+            batch_data, output_ids, effect_sample_output_list_length = \
+                self.preprocess_next_input_for_solver_fn(states, states_tensor, actions)
+
+            # recovery not continue records
+            for k in batch_data.keys():
+                batch_data[k] = [b if c else s for s, b, c, in zip(ori_states[k], batch_data[k], self.continue_list)]
             ori_error_data = batch_data.copy()
+
+            # a = 1
+            # for i, c in enumerate(self.continue_list):
+            #     if not c:
+            #         for k in batch_data.keys():
+            #             batch_data[k][i] = ori_states[k][i]
 
             pool = get_compile_pool()
             batch_size = len(output_ids)
@@ -543,8 +535,8 @@ class GenerateEnvironment(gym.Env):
                                      keyword_ids_list, inner_begin_label_list, inner_end_label_list, self.continue_list,
                                      self.last_sample, use_ast_list, vocabulary_list))
             # generate_args = [list(args) for args in generate_args]
-            # generate_result_list = list(pool.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
-            generate_result_list = list(itertools.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
+            generate_result_list = list(pool.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
+            # generate_result_list = list(itertools.starmap(generate_ac_to_error_action_and_create_input_and_target, generate_args))
             self.last_sample = generate_result_list
             result = torch.ones(batch_size).byte().to(actions[0].device)
             for one_iterate_sample in get_one_step_of_sample(generate_result_list):
