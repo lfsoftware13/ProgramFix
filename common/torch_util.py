@@ -591,5 +591,11 @@ class SequenceMaskOutput(nn.Module):
         return o
 
 
+def stable_log(input, e=10e-5):
+    stable_input = torch.clamp(input, e, 1 - e)
+    output = torch.log(stable_input)
+    return output
+
+
 if __name__ == '__main__':
     a = []

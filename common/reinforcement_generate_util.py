@@ -13,11 +13,12 @@ import torch.multiprocessing as mp
 
 from common.args_util import get_compile_pool
 from common.logger import info
-from common.torch_util import create_sequence_length_mask
+from common.torch_util import create_sequence_length_mask, stable_log
 from common.util import data_loader, create_effect_keyword_ids_set, PaddedList
 from error_generation.find_closest_group_data.token_level_closest_text import \
     calculate_distance_and_action_between_two_code
 from experiment.experiment_util import convert_action_map_to_old_action
+from model.base_attention import record_is_nan
 
 
 def generate_action_between_two_code(error_tokens, ac_tokens, max_distance=None, get_value=lambda x: x):
@@ -145,9 +146,15 @@ def create_output_from_actions_fn(create_or_sample_fn):
             is_copy_cat_probs = torch.stack([not_copy_probs, is_copy_sigmoid], dim=-1)
             is_copy, is_copy_log_probs = create_or_sample_fn(is_copy_cat_probs, explore_p)
 
+            # print('copy_output in create_output_from_actions: ', copy_output)
+            # record_is_nan(copy_output, 'copy_output in create_output_from_actions')
             copy_output_prob = F.softmax(copy_output, dim=-1)
             sample_output_prob = F.softmax(sample_output, dim=-1)
+            # print('copy_output_prob in create_output_from_actions: ', copy_output_prob)
+            # record_is_nan(copy_output_prob, 'copy_output_prob in create_output_from_actions')
             copy_output_id, copy_output_log_probs = create_or_sample_fn(copy_output_prob, explore_p)
+            # print('copy_output_log_probs in create_output_from_actions: ', copy_output_log_probs)
+            # record_is_nan(copy_output_log_probs, 'copy_output_log_probs in create_output_from_actions')
             sample_output_id, sample_output_log_probs = create_or_sample_fn(sample_output_prob, explore_p)
 
             sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=torch.unsqueeze(sample_output_id, dim=-1)), dim=-1)
@@ -190,7 +197,7 @@ def create_or_sample(probs, explore_p):
     else:
         output_probs, output = torch.topk(probs, dim=-1, k=1)
         output = torch.squeeze(output, dim=-1).data
-        output_log_probs = torch.squeeze(torch.log(output_probs), dim=-1)
+        output_log_probs = torch.squeeze(stable_log(output_probs), dim=-1)
     return output, output_log_probs
 
 
@@ -199,7 +206,8 @@ def create_random_sample(probs, explore_p):
     m = Categorical(random_probs)
     output = m.sample()
     output_probs = torch.squeeze(torch.gather(probs, index=torch.unsqueeze(output, dim=-1), dim=-1), dim=-1)
-    output_log_probs = torch.log(output_probs)
+    # print('in random sample: ', torch.sum(torch.eq(output_probs, 0.0)))
+    output_log_probs = stable_log(output_probs)
     return output, output_log_probs
 
 
@@ -637,6 +645,12 @@ def sample_generate_action_fn(create_output_from_actions_fn, calculate_encoder_s
         if steps % decay_step == 0:
             decay_explore()
 
+        # for i, out in enumerate(model_output):
+        #     try:
+        #         record_is_nan(out, 'model_output in sample generate action_{}'.format(i))
+        #     except Exception as e:
+        #         pass
+
         final_actions, final_actions_probs = create_output_from_actions_fn(states_tensor, model_output,
                                                                            do_sample=do_sample,
                                                                            direct_output=direct_output,
@@ -681,6 +695,9 @@ def mask_sample_probs_with_length(action_probs, sample_length):
     """
     p1_log_probs, p2_log_probs, is_copy_log_probs, copy_output_log_probs, sample_output_log_probs, \
     sample_output_ids_log_probs = action_probs
+    # record_is_nan(is_copy_log_probs, 'is_copy_log_probs in mask_sample')
+    # record_is_nan(copy_output_log_probs, 'copy_output_log_probs in mask_sample')
+    # record_is_nan(sample_output_log_probs, 'sample_output_log_probs in mask_sample')
     if not isinstance(sample_length, torch.Tensor):
         sample_length_tensor = torch.LongTensor(sample_length).to(is_copy_log_probs.device)
     else:
@@ -692,8 +709,9 @@ def mask_sample_probs_with_length(action_probs, sample_length):
 
     sample_total_log_probs = torch.sum(is_copy_log_probs + sample_output_ids_log_probs, dim=-1) / sample_length_tensor.float()
 
+    # record_is_nan(sample_total_log_probs, 'sample_total_log_probs in mask_sample')
     final_probs = p1_log_probs + p2_log_probs + sample_total_log_probs
-
+    # record_is_nan(final_probs, 'final_probs in mask_sample')
     return final_probs
 
 

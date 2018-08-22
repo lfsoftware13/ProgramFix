@@ -617,7 +617,7 @@ class ErrorPositionAndValueAccuracy(Evaluator):
         model_output = [t.data for t in model_output]
         if ignore_token is None:
             ignore_token = self.ignore_token
-        is_copy = (model_output[2] > 0.5).float()
+        is_copy = (torch.sigmoid(model_output[2]) > 0.5).float()
         is_copy_target = model_target[2]
         is_copy_accuracy = self.is_copy_accuracy.add_result(is_copy, is_copy_target)
         p0 = torch.topk(F.softmax(model_output[0], dim=-1), dim=-1, k=1)[1]

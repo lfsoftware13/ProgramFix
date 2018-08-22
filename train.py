@@ -401,7 +401,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        multi_step_sample_evaluator=[], vocabulary=None,
                        do_beam_search=False, target_file_path='main.out',
                        load_addition_generate_iterate_solver_train_dataset_fn=None,
-                       max_save_distance=None, addition_step=1):
+                       max_save_distance=None, addition_step=1, no_addition_step=5):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -546,7 +546,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
     for epoch in range(start_epoch, start_epoch+epoches):
         print('----------------------- in epoch {} --------------------'.format(epoch))
         combine_train_set = train_dataset
-        if addition_train and epoch % addition_step == 0:
+        if epoch > no_addition_step and addition_train and epoch % addition_step == 0:
             original_only_first = train_dataset.only_first
             train_dataset.set_only_first(True)
             multi_step_test_evalutor, sample_test_loss, save_data_dict = multi_step_evaluate(model=model, dataset=train_dataset,
@@ -566,7 +566,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                                                 do_beam_search=do_beam_search,
                                                                                 target_file_path=target_file_path,
                                                                                 do_save_data=True,
-                                                                                             max_save_distance=None)
+                                                                                max_save_distance=max_save_distance)
             print('addition train sample test loss: {}, evaluator : '.format(sample_test_loss))
             info('addition train sample test loss: {}, evaluator : '.format(sample_test_loss))
             for evaluator in multi_step_test_evalutor:
@@ -708,6 +708,7 @@ if __name__ == '__main__':
 
     max_save_distance = p_config.get('max_save_distance', None)
     addition_step = p_config.get('addition_step', 1)
+    no_addition_step = p_config.get('no_addition_step', 5)
 
     do_beam_search = p_config.get('do_beam_search', False)
 
@@ -752,7 +753,8 @@ if __name__ == '__main__':
                        extract_includes_fn=extract_includes_fn,
                        do_beam_search=do_beam_search, target_file_path=target_file_path,
                        load_addition_generate_iterate_solver_train_dataset_fn=load_addition_generate_iterate_solver_train_dataset_fn,
-                       max_save_distance=max_save_distance, addition_step=addition_step)
+                       max_save_distance=max_save_distance, addition_step=addition_step,
+                       no_addition_step=no_addition_step)
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)

@@ -334,9 +334,9 @@ def encoder_sample_config2(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = True
+    do_multi_step_sample = False
     epoch_ratio = 1.0
-    addition_step = 5
+    addition_step = 3
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -344,14 +344,14 @@ def encoder_sample_config2(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    # datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-    #                                                                       mask_transformer=transformer,
-    #                                                                       do_flatten=do_flatten, use_ast=use_ast,
-    #                                                                       do_multi_step_sample=do_multi_step_sample)
-    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-                                                              mask_transformer=transformer, do_flatten=do_flatten,
-                                                              use_ast=use_ast,
-                                                              do_multi_step_sample=do_multi_step_sample)
+    datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+                                                                          mask_transformer=transformer,
+                                                                          do_flatten=do_flatten, use_ast=use_ast,
+                                                                          do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
+    #                                                           use_ast=use_ast,
+    #                                                           do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -382,11 +382,11 @@ def encoder_sample_config2(is_debug):
     from experiment.experiment_dataset import load_addition_generate_iterate_solver_train_dataset_fn
     return {
         # 'name': 'graph_encoder_sample_config2',
-        'name': 'reinforcement_graph_encoder_sample_config2',
+        'name': 'graph_encoder_sample_config2_addition_data_retrain',
         # 'save_name': 'graph_encoder_sample_config2.pkl',
-        'save_name': 'rl_solver_graph_encoder_sample_config2.pkl',
+        'save_name': 'graph_encoder_sample_config2_addition_data_retrain.pkl',
         # 'load_model_name': 'graph_encoder_sample_config2.pkl',
-        'load_model_name': 'rl_solver_graph_encoder_sample_config2.pkl',
+        'load_model_name': 'graph_encoder_sample_config2_addition_data_retrain.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
         'model_fn': EncoderSampleModel,
@@ -434,15 +434,16 @@ def encoder_sample_config2(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': True,
+        'print_output': False,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
             load_addition_generate_iterate_solver_train_dataset_fn(vocabulary, transformer, do_flatten=True,
                                                                    use_ast=use_ast, do_multi_step_sample=False),
         'max_save_distance': 15,
-        'addition_train': False,
+        'addition_train': True,
         'addition_step': addition_step,
+        'no_addition_step': 10,
 
         'vocabulary': vocabulary,
         'parse_input_batch_data_fn': create_parse_input_batch_data_fn(use_ast=True),
@@ -456,7 +457,7 @@ def encoder_sample_config2(is_debug):
         'ac_copy_radio': 0.2,
 
         'epcohes': epoches,
-        'start_epoch': 30,
+        'start_epoch': 0,
         'epoch_ratio': epoch_ratio,
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,
@@ -732,7 +733,13 @@ def encoder_sample_data_generate2(is_debug):
     max_length = 500
     do_flatten = False
     do_multi_step_sample = False
-    generate_step = 10
+    generate_step = 2
+    if is_debug:
+        fast_ac_data_len = 50
+        fast_train_len = 50
+    else:
+        fast_ac_data_len = 3000
+        fast_train_len = 3000
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -790,12 +797,12 @@ def encoder_sample_data_generate2(is_debug):
     from common.reinforcement_generate_util import all_output_and_target_evaluate_fn
     return {
         # 'name': 'reinforcement_encoder_sample_dropout',
-        'name': 'reinforcement_graph_encoder_sample_config2',
-        's_saved_name': 'rl_solver_graph_encoder_sample_config2.pkl',
+        'name': 'reinforcement_graph_encoder_sample_config2_fast_iterate',
+        's_saved_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 's_load_model_name': 'encoder_sample_dropout_no_overfitting.pkl',
         's_load_model_name': 'graph_encoder_sample_config2.pkl',
-        'g_saved_name': 'rl_generator_graph_encoder_sample_config2.pkl',
-        'g_load_model_name': 'rl_generator_graph_encoder_sample_config2.pkl',
+        'g_saved_name': 'rl_generator_graph_encoder_sample_config2_fast_iterate.pkl',
+        'g_load_model_name': 'rl_generator_graph_encoder_sample_config2_fast_iterate.pkl',
         'load_previous_g_model': False,
         # 'logger_file_path': 'encoder_sample_dropout.log',
 
@@ -804,35 +811,40 @@ def encoder_sample_data_generate2(is_debug):
         'load_addition_generate_iterate_solver_train_dataset_fn':
             load_addition_generate_iterate_solver_train_dataset_fn(vocabulary, transformer, do_flatten=True,
                                                         use_ast=use_ast, do_multi_step_sample=False),
+        'only_cant_fix': True,
+        'max_generate_distance': 15,
 
         'g_model_fn': EncoderSampleModel,
-        'g_model_dict': {"start_label": begin_id,
-                       "end_label": end_id,
-                       "inner_start_label": inner_begin_id,
-                       "inner_end_label": inner_end_id,
-                       "vocabulary_size": vocabulary.vocabulary_size,
-                       "embedding_size": 400,
-                       "hidden_size": 400,
-                       "max_sample_length": 3,
-                       'graph_parameter': {'vocab_size': vocabulary.vocabulary_size,
-                                           'max_len': max_length, 'input_size': 400,
-                                           'input_dropout_p': 0.0, 'dropout_p': 0.0,
-                                           'n_layers': 3, 'bidirectional': True, 'rnn_cell': 'gru',
-                                           'variable_lengths': False, 'embedding': None,
-                                           'update_embedding': True},
-                       'graph_embedding': 'rnn',
-                       'pointer_type': 'query',
-                       'rnn_type': 'gru',
-                       "rnn_layer_number": 3,
-                       "max_length": max_length,
-                       'dropout_p': 0,
-                       'pad_label': pad_id,
-                       'vocabulary': vocabulary,
-                       'mask_type': 'static',
-                       'beam_size': 1,
-                       'p2_type': 'static',
-                       'p2_step_length': -1,
-                       },
+        'g_model_dict':
+            {"start_label": begin_id,
+             "end_label": end_id,
+             "inner_start_label": inner_begin_id,
+             "inner_end_label": inner_end_id,
+             "vocabulary_size": vocabulary.vocabulary_size,
+             "embedding_size": 400,
+             "hidden_size": 400,
+             "max_sample_length": 3,
+             'graph_parameter': {"rnn_parameter": {'vocab_size': vocabulary.vocabulary_size,
+                                                   'max_len': max_length, 'input_size': 400,
+                                                   'input_dropout_p': 0.2, 'dropout_p': 0.2,
+                                                   'n_layers': 1, 'bidirectional': True, 'rnn_cell': 'gru',
+                                                   'variable_lengths': False, 'embedding': None,
+                                                   'update_embedding': True, },
+                                 "graph_type": "ggnn",
+                                 "graph_itr": 3,
+                                 "dropout_p": 0.2,
+                                 "mask_ast_node_in_rnn": False
+                                 },
+             'graph_embedding': 'mixed',
+             'pointer_type': 'query',
+             'rnn_type': 'gru',
+             "rnn_layer_number": 3,
+             "max_length": max_length,
+             'dropout_p': 0.2,
+             'pad_label': pad_id,
+             'vocabulary': vocabulary,
+             'mask_type': 'static'
+             },
 
         'agent_dict': {
             'parse_input_batch_data_fn': create_parse_input_batch_data_fn(use_ast=use_ast),
@@ -945,6 +957,12 @@ def encoder_sample_data_generate2(is_debug):
 
         'ac_copy_train': False,
         'ac_copy_radio': 0.2,
+
+        'do_tree_generate': False,
+
+        'do_fast_generate': True,
+        'fast_train_len': fast_train_len,
+        'fast_ac_data_len': fast_ac_data_len,
 
         'epcohes': epoches,
         'start_epoch': 0,

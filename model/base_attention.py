@@ -40,6 +40,7 @@ def create_hook_fn(name):
         v = v.detach()
         nan_result = is_nan(v)
         info("{} gradient: is nan {}, max value: {}, min value: {}".format(name, nan_result, torch.max(v).item(), torch.min(v).item()))
+        print("{} gradient: is nan {}, max value: {}, min value: {}".format(name, nan_result, torch.max(v).item(), torch.min(v).item()))
         # if nan_result:
         #     print(v)
         # print("{} gradient: is nan {}".format(name, is_nan(v.detach())))

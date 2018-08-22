@@ -20,6 +20,7 @@ from common.torch_util import create_sequence_length_mask, Update, MaskOutput, e
     SequenceMaskOutput, expand_tensor_sequence_len, expand_tensor_sequence_to_same, DynamicDecoder, \
     pad_last_dim_of_tensor_list, BeamSearchDynamicDecoder
 from common.util import PaddedList, create_effect_keyword_ids_set
+from model.base_attention import record_is_nan
 from seq2seq.models import EncoderRNN, DecoderRNN
 
 """
@@ -251,6 +252,11 @@ class Output(nn.Module):
         sample_length_shape = sample_length.shape
         sample_length_mask = create_sequence_length_mask(sample_length.view(-1, ), max_len=sample_mask.shape[-1]).view(*list(sample_length_shape), -1)
         sample_output = self.sample_output(decoder_output, sample_mask, sample_length_mask)
+        # try:
+        #     record_is_nan(copy_output, 'copy_output in output')
+        #     print(copy_output.tolist())
+        # except Exception as e:
+        #     pass
         return is_copy, copy_output, sample_output
 
 
@@ -387,12 +393,19 @@ class EncoderSampleModel(nn.Module):
                                      copy_length=copy_length, ori_input_seq=ori_input_seq, input_length=input_length)
         is_copy_list, copy_output_list, sample_output_list, compatible_tokens_list = list(zip(*decoder_output_list))
 
+        # for i, v in enumerate(copy_output_list):
+        #     record_is_nan(v, 'copy_output_{}'.format(str(i)))
         is_copy = torch.cat(is_copy_list, dim=1)
         copy_output = torch.cat(copy_output_list, dim=1)
         padded_sample_output_list = pad_last_dim_of_tensor_list(sample_output_list, fill_value=-float('inf'))
         sample_output = torch.cat(padded_sample_output_list, dim=1)
         padded_compatible_tokens_list = pad_last_dim_of_tensor_list(compatible_tokens_list, fill_value=0)
         pad_compatible_tokens = torch.cat(padded_compatible_tokens_list, dim=1)
+        # record_is_nan(p1_o, 'p1_o')
+        # record_is_nan(p2_o, 'p2_o')
+        # record_is_nan(is_copy, 'is_copy')
+        # record_is_nan(copy_output, 'copy_output')
+        # record_is_nan(sample_output, 'sample_output')
         return p1_o, p2_o, is_copy, copy_output, sample_output, pad_compatible_tokens
 
     def _beam_search_sample_forward(self,
@@ -467,9 +480,11 @@ class EncoderSampleModel(nn.Module):
             self.create_one_step_token_masks(ori_input_seq=ori_input_seq, input_length=input_length, continue_mask=continue_mask,
                                              copy_length=copy_length)
 
+        # record_is_nan(decoder_output, 'decoder_output in one step decoder')
         is_copy, copy_output, sample_output = self.output(decoder_output, encoder_output, copy_mask, compatible_tokens,
                                                           compatible_tokens_length, is_sample=True,
                                                           copy_target=None)
+        # record_is_nan(copy_output, 'copy_output in one step decoder')
         error_list = []
         return (is_copy, copy_output, sample_output, compatible_tokens), hidden, error_list
 

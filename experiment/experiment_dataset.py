@@ -543,6 +543,28 @@ class FlattenRandomIterateRecords:
         self.random_i = 0
 
 
+class SamplePackedDataset(CustomerDataSet):
+
+    def __init__(self, dataset, data_len):
+        self.datasets = dataset
+        self.data_len = data_len
+        self.total_len = len(self.datasets)
+
+    def __len__(self):
+        if self.total_len < self.data_len:
+            return self.total_len
+        return self.data_len
+
+    def __getitem__(self, index):
+        rand_i = random.randint(0, self.total_len-1)
+        return self.datasets[rand_i]
+
+    def add_dataset(self, dataset):
+        new_dataset = self.datasets + dataset
+        new_packed_dataset = SamplePackedDataset(new_dataset, self.data_len)
+        return new_packed_dataset
+
+
 def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
                                           do_multi_step_sample=False):
     if is_debug:

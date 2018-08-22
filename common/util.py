@@ -1150,7 +1150,7 @@ def retokenize_error_code(error_code_names_list, tokenize_fn):
 
 
 def save_addition_data(original_states, states, tokenize_fn, batch_size, file_path, target_file_path, vocabulary=None,
-                       max_distande=None, only_error=False):
+                       max_distande=None, only_error=False, save_list=None):
     from common.reinforcement_generate_util import generate_action_between_two_code
     save_data_dict = {'ac_code': [], 'action_character_list': [], 'includes': [],
                       'error_count': [], 'distance': [], 'id': []}
@@ -1192,9 +1192,15 @@ def save_addition_data(original_states, states, tokenize_fn, batch_size, file_pa
     distance_list, action_list = list(zip(*generate_result))
     a = 1
 
-    for ac_code_list, inc, prog_id, ac_res, err_res, actions, dis \
+    if save_list is None:
+        save_list = [True for _ in range(len(ac_code_names_list))]
+
+    for ac_code_list, inc, prog_id, ac_res, err_res, actions, dis, sav \
             in zip(ac_code_names_list, original_states['includes'], original_states['id'],
-                   ac_res_list, error_res_list, action_list, distance_list):
+                   ac_res_list, error_res_list, action_list, distance_list, save_list):
+        if not sav:
+            continue
+
         if dis < 0:
             continue
         if max_distande is not None and dis > max_distande:

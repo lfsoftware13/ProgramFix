@@ -21,7 +21,7 @@ from common.util import data_loader, compile_code_ids_list, add_pid_to_file_path
 import torch.functional as F
 
 from database.database_util import create_table, insert_items
-from experiment.experiment_dataset import CombineDataset
+from experiment.experiment_dataset import CombineDataset, SamplePackedDataset
 
 IGNORE_TOKEN = -1
 
@@ -365,7 +365,8 @@ def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch
 
 def train_generate_model(generate_agent, generate_env: GenerateEnvironment, parse_input_batch_data_fn, file_path='',
                         target_file_path='main.out', save_data_fn=None, max_error_count=5, vocabulary=None,
-                         max_generate_distance=10):
+                         max_generate_distance=10, only_error=False,
+                         only_cant_fix=False):
     total_loss = 0
     total_batch = 0
     steps = 0
@@ -426,9 +427,14 @@ def train_generate_model(generate_agent, generate_env: GenerateEnvironment, pars
         info(loss_info)
 
         if save_data_fn is not None:
+            if only_cant_fix:
+                save_list = done_list
+            else:
+                save_list = None
             save_res_dict = save_addition_data(original_states=original_states, states=states, tokenize_fn=tokenize_fn,
                                           batch_size=batch_size, file_path=file_path, target_file_path=target_file_path,
-                                               vocabulary=vocabulary)
+                                               vocabulary=vocabulary, max_distande=max_generate_distance,
+                                               only_error=only_error, save_list=save_list)
             for k, v in save_res_dict.items():
                 save_data_dict[k] = save_data_dict.get(k, []) + v
 
@@ -454,9 +460,11 @@ def train_and_evaluate(g_model, s_model, environment_dict, agent_dict, batch_siz
                        create_multi_step_next_input_batch_fn=None, extract_includes_fn=None,
                        multi_step_sample_evaluator=[], vocabulary=None,
                        do_beam_search=False, target_file_path='main.out', random_agent_dict=None,
-                       max_generate_distance=10, save_data_fn=lambda x: x,
+                       max_generate_distance=10, save_data_fn=lambda x: x, only_cant_fix=False,
                        load_addition_generate_iterate_solver_train_dataset_fn=None,
-                       do_random_generate=False, generate_step=10):
+                       do_random_generate=False, generate_step=10,
+                       do_tree_generate=False, do_fast_generate=False,
+                       fast_train_len=100, fast_ac_data_len=100):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -476,22 +484,43 @@ def train_and_evaluate(g_model, s_model, environment_dict, agent_dict, batch_siz
     g_optimizer = optimizer(filter(lambda p: p.requires_grad, g_model.parameters()), lr=learning_rate, **g_optimizer_dict)
     s_optimizer = optimizer(filter(lambda p: p.requires_grad, s_model.parameters()), lr=learning_rate, **s_optimizer_dict)
 
+    if do_fast_generate:
+        ac_dataset = SamplePackedDataset(ac_dataset, fast_ac_data_len)
+    sample_packed_train_set = None
+    generate_dataset = None
+    last_generate_list = []
     if do_random_generate:
         random_agent = create_generate_agent(g_model, g_optimizer, random_agent_dict)
         env = create_generate_env(s_model, ac_dataset, environment_dict)
         generate_data = train_generate_model(generate_agent=random_agent, generate_env=env, parse_input_batch_data_fn=parse_input_batch_data_fn,
-                             file_path=compile_file_path, target_file_path=target_file_path, save_data_fn=save_data_fn,
-                             max_error_count=g_max_step_times, vocabulary=vocabulary, max_generate_distance=max_generate_distance)
+                                             file_path=compile_file_path, target_file_path=target_file_path, save_data_fn=save_data_fn,
+                                             max_error_count=g_max_step_times, vocabulary=vocabulary,
+                                             max_generate_distance=max_generate_distance, only_error=True,
+                                             only_cant_fix=only_cant_fix)
         generate_df = pd.DataFrame(generate_data)
-        if load_addition_generate_iterate_solver_train_dataset_fn is not None:
-            generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df, train_dataset.id_to_program_dict)
+        if do_tree_generate:
+            generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df,
+                                                                                      train_dataset.id_to_program_dict)
             combine_train_set = CombineDataset(train_dataset, generate_dataset, train_dataset.id_to_program_dict, max_dataset_count=3)
+        elif do_fast_generate:
+            generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df,
+                                                                                      train_dataset.id_to_program_dict,
+                                                                                      no_id_to_program_dict=True)
+
+            sample_packed_train_set = SamplePackedDataset(train_dataset, data_len=fast_train_len)
+            combine_train_set = sample_packed_train_set + generate_dataset
+            last_generate_list += [generate_dataset]
         else:
+            generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df,
+                                                                                      train_dataset.id_to_program_dict)
             combine_train_set = CombineDataset(train_dataset, train_dataset, train_dataset.id_to_program_dict, max_dataset_count=3)
     else:
-        combine_train_set = CombineDataset(train_dataset, train_dataset, train_dataset.id_to_program_dict,
-                                           max_dataset_count=3)
-        pass
+        if do_tree_generate:
+            combine_train_set = CombineDataset(train_dataset, train_dataset, train_dataset.id_to_program_dict, max_dataset_count=3)
+        elif do_fast_generate:
+            sample_packed_train_set = SamplePackedDataset(train_dataset, data_len=fast_train_len)
+            combine_train_set = sample_packed_train_set
+
 
     if load_previous:
         # valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
@@ -640,9 +669,6 @@ def train_and_evaluate(g_model, s_model, environment_dict, agent_dict, batch_siz
             # print(info_output)
             # combine_train_set = combine_train_set.combine_dataset(addition_dataset)
 
-        # if ac_copy_train:
-        #     combine_train_set = combine_train_set.combine_dataset(ac_copy_dataset.remain_dataset(frac=ac_copy_radio))
-
         train_evaluator, train_loss = train(model=s_model, dataset=combine_train_set, batch_size=batch_size,
                                             loss_function=train_loss_fn, optimizer=s_optimizer, clip_norm=clip_norm,
                                             epoch_ratio=epoch_ratio, parse_input_batch_data_fn=parse_input_batch_data_fn,
@@ -684,16 +710,33 @@ def train_and_evaluate(g_model, s_model, environment_dict, agent_dict, batch_siz
             torch_util.save_model(s_model, s_save_path+str(epoch))
 
         if (epoch+1) % generate_step == 0:
+            if do_fast_generate and generate_dataset is not None:
+                sample_packed_train_set = sample_packed_train_set.add_dataset(generate_dataset)
             env = create_generate_env(s_model, ac_dataset, environment_dict)
             generate_data = train_generate_model(generate_agent=agent, generate_env=env, parse_input_batch_data_fn=parse_input_batch_data_fn,
                                  file_path=compile_file_path, target_file_path=target_file_path, save_data_fn=save_data_fn,
                                  max_error_count=g_max_step_times, vocabulary=vocabulary,
-                                 max_generate_distance=max_generate_distance)
+                                 max_generate_distance=max_generate_distance,
+                                                 only_error=True,
+                                                 only_cant_fix=only_cant_fix)
             generate_df = pd.DataFrame(generate_data)
-            generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df,
-                                                                                      train_dataset.id_to_program_dict)
-            combine_train_set = CombineDataset(combine_train_set, generate_dataset, train_dataset.id_to_program_dict,
-                                               max_dataset_count=3)
+            if do_tree_generate:
+                generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df,
+                                                                                          train_dataset.id_to_program_dict)
+                combine_train_set = CombineDataset(combine_train_set, generate_dataset,
+                                                   train_dataset.id_to_program_dict,
+                                                   max_dataset_count=3)
+            elif do_fast_generate:
+                generate_dataset = load_addition_generate_iterate_solver_train_dataset_fn(generate_df,
+                                                                                          train_dataset.id_to_program_dict,
+                                                                                          no_id_to_program_dict=True)
+                sample_packed_train_set = SamplePackedDataset(train_dataset, data_len=fast_train_len)
+                for da in last_generate_list:
+                    sample_packed_train_set = sample_packed_train_set.add_dataset(da)
+                combine_train_set = sample_packed_train_set + generate_dataset
+                last_generate_list += [generate_dataset]
+                if len(last_generate_list) > 20:
+                    last_generate_list = last_generate_list[1:]
 
             if not is_debug:
                 torch_util.save_model(g_model, g_save_path+str(epoch))
@@ -778,10 +821,16 @@ if __name__ == '__main__':
     agent_dict = p_config['agent_dict']
     random_agent_dict = p_config['random_agent_dict']
     max_generate_distance = p_config.get('max_generate_distance', 10)
+    only_cant_fix = p_config.get('only_cant_fix', False)
     save_data_fn = p_config['save_data_fn']
     load_addition_generate_iterate_solver_train_dataset_fn = p_config['load_addition_generate_iterate_solver_train_dataset_fn']
     do_random_generate = p_config['do_random_generate']
     generate_step = p_config['generate_step']
+
+    do_tree_generate = p_config.get('do_tree_generate', False)
+    do_fast_generate = p_config.get('do_fast_generate', False)
+    fast_train_len = p_config.get('fast_train_len', 50)
+    fast_ac_data_len = p_config.get('fast_ac_data_len', 50)
 
     load_previous_g_model = p_config.get('load_previous_g_model', False)
     s_model_path = os.path.join(save_root_path, p_config['s_load_model_name'])
@@ -830,9 +879,11 @@ if __name__ == '__main__':
                        create_multi_step_next_input_batch_fn=create_multi_step_next_input_batch_fn,
                        extract_includes_fn=extract_includes_fn,
                        do_beam_search=do_beam_search, target_file_path=target_file_path,
-                       max_generate_distance=max_generate_distance, save_data_fn=save_data_fn,
+                       max_generate_distance=max_generate_distance, save_data_fn=save_data_fn, only_cant_fix=only_cant_fix,
                        load_addition_generate_iterate_solver_train_dataset_fn=load_addition_generate_iterate_solver_train_dataset_fn,
-                       do_random_generate=do_random_generate, generate_step=generate_step)
+                       do_random_generate=do_random_generate, generate_step=generate_step,
+                       do_tree_generate=do_tree_generate, do_fast_generate=do_fast_generate,
+                       fast_train_len=fast_train_len, fast_ac_data_len=fast_ac_data_len)
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)
