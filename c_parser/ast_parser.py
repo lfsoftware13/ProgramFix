@@ -78,18 +78,24 @@ Coordinate = namedtuple("Coordinate", ["x", "y"])
 
 
 class CodeGraph(object):
-    def __init__(self, tokens, ast_list):
+    def __init__(self, tokens, ast_list, add_sequence_link=False):
         self._tokens = tokens
         self._code_legth = len(tokens)
         self._pos_to_id_dict = self._generate_position_to_id(tokens)
         self._ast_list = ast_list
         self._link_tuple_list = [] # a tuple list (id1, id2, link_name)
+        if add_sequence_link:
+            self._add_the_sequence_link()
         self._add_same_identifier_link()
         self._graph_ = [t.value for t in tokens]
         self._graph_.append("<Delimiter>")
         self._max_id = len(self._graph_)
         self._name_pattern = re.compile(r'(.+)\[\d+\]')
         self._parse_ast_list(ast_list)
+
+    def _add_the_sequence_link(self):
+        for i, _ in enumerate(self._tokens[1:]):
+            self._add_link(i, i+1, "seq_link")
 
     def _add_same_identifier_link(self):
         identifier_pos_map = defaultdict(list)
@@ -180,9 +186,22 @@ class CodeGraph(object):
         return res
 
 
-def parse_ast_code_graph(token_list):
+def set_ast_config_attribute(k, v):
+    c = ast_config()
+    c[k] = v
+
+
+def ast_config():
+    if getattr(ast_config, "config", None) is None:
+        c = {'add_sequence_link': False}
+        ast_config.config = c
+
+    return ast_config.config
+
+
+def parse_ast_code_graph(token_list, ):
     ast, tokens = ast_parse("\n"+" ".join(token_list))
-    return CodeGraph(tokens, ast)
+    return CodeGraph(tokens, ast, add_sequence_link=ast_config()['add_sequence_link'])
 
 
 if __name__ == '__main__':

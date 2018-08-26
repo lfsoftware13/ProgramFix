@@ -477,6 +477,8 @@ def encoder_sample_config2(is_debug):
 
 
 def encoder_sample_config3(is_debug):
+    from c_parser.ast_parser import set_ast_config_attribute
+    set_ast_config_attribute("add_sequence_link", True)
     vocabulary = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
                                                    end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
                                                    addition_tokens=['<PAD>'])
