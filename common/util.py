@@ -28,6 +28,7 @@ from torch.utils.data import Dataset
 import torch.multiprocessing as mp
 
 from common.args_util import get_compile_pool
+from common.logger import info
 from common.new_tokenizer import tokenize
 from config import num_processes
 
@@ -1190,6 +1191,21 @@ def save_addition_data(original_states, states, tokenize_fn, batch_size, file_pa
     generate_result = list(pool.starmap(generate_action_between_two_code, generate_args))
     # generate_result = list(itertools.starmap(generate_action_between_two_code, generate_args))
     distance_list, action_list = list(zip(*generate_result))
+
+    print_save_data = False
+    if print_save_data:
+        for i in range(batch_size):
+            info('--------------------------- in save data {} batch ------------------------------------'.format(i))
+            ac_full_code = ' '.join(ac_code_names_list[i])
+            error_full_code = ' '.join(error_code_names_list[i])
+            actions = action_list[i]
+            dis = distance_list[i]
+            info('ac_code : {}'.format(ac_full_code))
+            info('err_code: {}'.format(error_full_code))
+            info('dis: {}'.format(dis))
+            info('actions: {}'.format(str(actions)))
+            info('effect batch: {}'.format(save_list[i]))
+
     a = 1
 
     if save_list is None:

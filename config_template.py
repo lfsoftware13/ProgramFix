@@ -17,3 +17,4 @@ DEEPFIX_DB = '/home/lf/new_disk/data_store/deepfix/deepfix.db'
 SLK_SAMPLE_DBPATH = os.path.join(root, 'data', 'slk_sample_data.db')
 FAKE_DEEPFIX_ERROR_DATA_DBPATH = os.path.join(root, 'data', 'fake_deepfix_error_data.db')
 num_processes = 6
+DATA_RECORDS_DEEPFIX_DBPATH = os.path.join(root, 'data', 'data_records_deepfix.db')

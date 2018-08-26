@@ -1,4 +1,5 @@
 import copy
+import json
 import os
 import random
 
@@ -160,6 +161,28 @@ class MixedRNNGraphWrapper(nn.Module):
         return x
 
 
+class MultiIterationGraphWrapper(nn.Module):
+    def __init__(self,
+                 hidden_size,
+                 graph_type,
+                 graph_itr,
+                 dropout_p=0,
+                 ):
+        super().__init__()
+        self.graph_itr = graph_itr
+        self.dropout = nn.Dropout(dropout_p)
+        self.inner_graph_itr = 1
+        if graph_type == 'ggnn':
+            self.graph = GGNNLayer(hidden_size)
+
+    def forward(self, x, adj, copy_length):
+        for i in range(self.graph_itr):
+            x = x + self.graph(x, adj)
+            if i < self.graph_itr - 1:
+                x = self.dropout(x)
+        return x
+
+
 class GraphEncoder(nn.Module):
     def __init__(self,
                  hidden_size=300,
@@ -190,7 +213,7 @@ class GraphEncoder(nn.Module):
             self.p2_pointer_network = PointerNetwork(hidden_size, use_query_vector=True)
         self.graph_embedding = graph_embedding
         if graph_embedding == 'ggnn':
-            self.graph = MultiIterationGraph(GGNNLayer(hidden_state_size=hidden_size), **graph_parameter)
+            self.graph = MultiIterationGraphWrapper(hidden_size=hidden_size, **graph_parameter)
         elif graph_embedding == 'rnn':
             self.graph = RNNGraphWrapper(hidden_size=hidden_size, parameter=graph_parameter)
         elif graph_embedding == 'mixed':
@@ -873,4 +896,31 @@ def multi_step_print_output_records_fn(inner_end_id):
                 info('part output: {}'.format(id_to_code_fn(sample_output_ids)))
 
     return multi_step_print_output_records
+
+
+def change_output_records_to_batch(output_records_list, sample_steps):
+    output_records_list = [[o.tolist() for o in s] for s in output_records_list]
+    batch_size = len(output_records_list[0])
+    batch_output_records = [[[o[i] for o in s] for s in output_records_list] for i in range(batch_size)]
+    batch_steps_output_records = [b[:s] for b, s in zip(batch_output_records, sample_steps)]
+    return batch_steps_output_records
+
+
+def create_save_database_records(batch_data, sample_steps, final_output_name_list, result_list,
+                                 batch_output_records):
+    batch_size = len(batch_data['id'])
+
+    records_list = []
+    for i in range(batch_size):
+        id = batch_data['id'][i]
+        includes = json.dumps(batch_data['includes'][i])
+        code = ' '.join(batch_data['input_seq_name'][i])
+        sample_code = ' '.join(final_output_name_list[i])
+        compile_res = 1 if result_list[i] else 0
+        sample_step = sample_steps[i]
+        sample_records = json.dumps(batch_output_records[i])
+        one = (id, includes, code, sample_code, compile_res, sample_step, sample_records)
+        records_list += [one]
+    return records_list
+
 

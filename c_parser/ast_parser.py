@@ -220,7 +220,7 @@ if __name__ == '__main__':
     code1 = """
     int main ( ) 
     {
-        int output ( int ) include < stdio . h > 
+        int output ( int )
         int main ( ) 
         { 
             int n , k , i ; 
@@ -240,9 +240,16 @@ if __name__ == '__main__':
             return 0 ; 
         }
     """
-    ast, tokens = ast_parse(code1)
+    code2 = r"""
+    int main () int a = 0; a = a + 1; } """
+    ast, tokens = ast_parse(code2)
     print(ast)
-    print(CodeGraph(tokens, ast))
+    g = CodeGraph(tokens, ast)
+    print(g)
+    in_seq, graph = g.graph
+    index_seq = [(i, s) for i, s in enumerate(in_seq)]
+    print(index_seq)
+    print(graph)
     # code2 = """
     # int add(int a,int b){
     #     return a+b;

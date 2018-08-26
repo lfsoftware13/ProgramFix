@@ -8,6 +8,7 @@ from torch import nn, optim
 from tqdm import tqdm
 
 from common import torch_util, problem_util, util
+from common.constants import DATA_RECORDS_DEEPFIX
 from common.evaluate_util import CompileResultEvaluate
 from common.logger import init_a_file_logger, info
 from common.problem_util import to_cuda
@@ -15,7 +16,7 @@ from common.util import data_loader, compile_code_ids_list, add_pid_to_file_path
     create_special_tokens_ids, create_special_token_mask_list
 import torch.functional as F
 
-from database.database_util import create_table, insert_items
+from database.database_util import create_table, insert_items, run_sql_statment
 from experiment.experiment_dataset import IterateErrorDataSet
 
 IGNORE_TOKEN = -1
@@ -34,7 +35,7 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        torch_util.load_model(m, path, map_location={'cuda:0': 'cuda:1'})
+        torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
         # torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
@@ -188,7 +189,8 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
              expand_output_and_target_fn=None, max_step_times=0, vocabulary=None, file_path='',
                         create_multi_step_next_input_batch_fn=None, extract_includes_fn=lambda x: x['includes'],
                         print_output_fn=None, do_beam_search=False, target_file_path='main.out', do_save_data=False,
-                        max_save_distance=None):
+                        max_save_distance=None, save_records_to_database=False,
+                        db_path='', table_name=''):
     total_loss = to_cuda(torch.Tensor([0]))
     total_batch = to_cuda(torch.Tensor([0]))
     steps = 0
@@ -202,6 +204,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
     from common.pycparser_util import tokenize_by_clex_fn
     tokenize_fn = tokenize_by_clex_fn()
     save_data_dict = {}
+    save_records_list = []
 
     # file_path = add_pid_to_file_path(file_path)
     # target_file_path = add_pid_to_file_path(target_file_path)
@@ -214,9 +217,10 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                 input_data = batch_data.copy()
                 final_output_list = []
                 output_records_list = []
-                continue_list = [True for i in range(batch_size)]
-                result_list = [False for i in range(batch_size)]
+                continue_list = [True for _ in range(batch_size)]
+                result_list = [False for _ in range(batch_size)]
                 result_records_list = []
+                sample_steps = [-1 for _ in range(batch_size)]
 
                 for i in range(max_step_times):
                     model_input = parse_input_batch_data_fn(input_data, do_sample=True)
@@ -235,9 +239,12 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                                                           includes_list=extract_includes_fn(input_data), file_path=file_path,
                                                                        target_file_path=target_file_path, do_compile_pool=True,
                                                                        need_transform=False)
+                    sample_steps = [i+1 if s == -1 and not c else s for s, c in zip(sample_steps, continue_list)]
+
                     result_records_list += [result_list]
                     if sum(continue_list) == 0:
                         break
+                sample_steps = [max_step_times if s == -1 else s for s in sample_steps]
 
                 if do_save_data:
                     batch_data['input_seq_name'] = batch_data['final_output_name']
@@ -250,6 +257,14 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                                                        only_error=True)
                     for k, v in save_res_dict.items():
                         save_data_dict[k] = save_data_dict.get(k, []) + v
+
+                if save_records_to_database:
+                    from model.encoder_sample_model import change_output_records_to_batch
+                    from model.encoder_sample_model import create_save_database_records
+                    batch_output_records = change_output_records_to_batch(output_records_list, sample_steps)
+                    records_list = create_save_database_records(batch_data, sample_steps, final_output_name_list, result_list,
+                                                 batch_output_records)
+                    save_records_list += records_list
 
                 step_output = 'in evaluate step {}: '.format(steps)
                 res = compile_evaluator.add_result(result_list)
@@ -269,6 +284,11 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                 steps += 1
                 pbar.update(batch_size)
     evaluate_obj_list = [compile_evaluator] + evaluate_obj_list
+
+    if save_records_to_database:
+        create_table(db_path, DATA_RECORDS_DEEPFIX, replace_table_name=table_name)
+        run_sql_statment(db_path, DATA_RECORDS_DEEPFIX, 'insert_ignore', save_records_list, replace_table_name=table_name)
+
 
     return evaluate_obj_list, (total_loss / steps).item(), save_data_dict
 
@@ -401,7 +421,8 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        multi_step_sample_evaluator=[], vocabulary=None,
                        do_beam_search=False, target_file_path='main.out',
                        load_addition_generate_iterate_solver_train_dataset_fn=None,
-                       max_save_distance=None, addition_step=1, no_addition_step=5):
+                       max_save_distance=None, addition_step=1, no_addition_step=5,
+                       do_save_records_to_database=False):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -502,7 +523,9 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                                              print_output_fn=print_output_fn,
                                                                              do_beam_search=do_beam_search,
                                                                              target_file_path=target_file_path,
-                                                                                do_save_data=False)
+                                                                                do_save_data=False,
+                                                                                save_records_to_database=do_save_records_to_database,
+                                                                                db_path=db_path, table_name=table_basename)
             print('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             info('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             for evaluator in multi_step_test_evalutor:
@@ -542,10 +565,9 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
         print(evaluate_output)
         info(evaluate_output)
         pass
-
+    combine_train_set = train_dataset
     for epoch in range(start_epoch, start_epoch+epoches):
         print('----------------------- in epoch {} --------------------'.format(epoch))
-        combine_train_set = train_dataset
         if epoch > no_addition_step and addition_train and epoch % addition_step == 0:
             original_only_first = train_dataset.only_first
             train_dataset.set_only_first(True)
@@ -691,6 +713,7 @@ if __name__ == '__main__':
     add_data_record_fn = p_config.get('add_data_record_fn', None)
     db_path = p_config.get('db_path', None)
     table_basename = p_config.get('table_basename', None)
+    do_save_records_to_database = p_config.get('do_save_records_to_database', False)
     create_output_ids_fn = p_config['create_output_ids_fn']
     vocabulary = p_config['vocabulary']
 
@@ -754,7 +777,7 @@ if __name__ == '__main__':
                        do_beam_search=do_beam_search, target_file_path=target_file_path,
                        load_addition_generate_iterate_solver_train_dataset_fn=load_addition_generate_iterate_solver_train_dataset_fn,
                        max_save_distance=max_save_distance, addition_step=addition_step,
-                       no_addition_step=no_addition_step)
+                       no_addition_step=no_addition_step, do_save_records_to_database=do_save_records_to_database)
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)
