@@ -518,23 +518,6 @@ def encoder_sample_config3(is_debug):
     #                                                           use_ast=use_ast,
     #                                                           do_multi_step_sample=do_multi_step_sample)
 
-    # if is_debug:
-    #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
-    #     from experiment.experiment_dataset import IterateErrorDataSet
-    #     datasets = []
-    #     for t in load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten):
-    #         t = pd.DataFrame(t)
-    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length, do_flatten=do_flatten))
-    #     datasets.append(None)
-    # else:
-    #     from experiment.experiment_util import load_common_error_data_with_encoder_copy
-    #     from experiment.experiment_dataset import IterateErrorDataSet
-    #     datasets = []
-    #     for t in load_common_error_data_with_encoder_copy(inner_begin_id, inner_end_id):
-    #         t = pd.DataFrame(t)
-    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length))
-    #     datasets.append(None)
-
     train_len = len(datasets[0]) * epoch_ratio if datasets[0] is not None else 100
 
     from model.encoder_sample_model import EncoderSampleModel
@@ -547,19 +530,19 @@ def encoder_sample_config3(is_debug):
     from experiment.experiment_dataset import load_addition_generate_iterate_solver_train_dataset_fn
     return {
         # 'name': 'graph_encoder_sample_config2',
-        'name': 'graph_encoder_sample_config3_only_ggnn',
+        'name': 'graph_encoder_sample_config3_only_ggnn_with_sequence_link',
         # 'name': 'reinforcement_graph_encoder_sample_config2_fast_iterate',
         # 'save_name': 'graph_encoder_sample_config2.pkl',
-        'save_name': 'graph_encoder_sample_config3_only_ggnn.pkl',
+        'save_name': 'graph_encoder_sample_config3_only_ggnn_with_sequence_link.pkl',
         # 'save_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'load_model_name': 'graph_encoder_sample_config2.pkl',
-        'load_model_name': 'graph_encoder_sample_config3_only_ggnn.pkl',
+        'load_model_name': 'graph_encoder_sample_config3_only_ggnn_with_sequence_link.pkl',
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
         'do_save_records_to_database': False,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'graph_encoder_sample_config3_only_ggnn',
+        'table_basename': 'graph_encoder_sample_config3_only_ggnn_with_sequence_link',
 
         'model_fn': EncoderSampleModel,
         'model_dict':
@@ -1145,3 +1128,24 @@ def encoder_sample_data_generate2(is_debug):
         'ac_data': ac_dataset,
     }
 
+
+def sensibility_rnn_config(is_debug):
+    vocabulary = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                        end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                        addition_tokens=['<PAD>'])
+    begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+    end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+    inner_begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[1])
+    inner_end_id = vocabulary.word_to_id(vocabulary.end_tokens[1])
+    pad_id = vocabulary.word_to_id(vocabulary.addition_tokens[0])
+    use_ast = False
+    if use_ast:
+        from experiment.experiment_dataset import load_graph_vocabulary
+        vocabulary = load_graph_vocabulary(vocabulary)
+
+    from experiment.experiment_dataset import load_deepfix_ac_code_for_generate_dataset
+    ac_dataset = load_deepfix_ac_code_for_generate_dataset(is_debug=is_debug, vocabulary=vocabulary,
+                                                           mask_transformer=transformer, do_flatten=do_flatten,
+                                                           use_ast=use_ast,
+                                                           do_multi_step_sample=True)
+    pass
