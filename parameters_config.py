@@ -648,11 +648,11 @@ def encoder_sample_config4(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                                          mask_transformer=transformer,
-                                                                          do_flatten=do_flatten, use_ast=use_ast,
-                                                                          do_multi_step_sample=do_multi_step_sample,
-                                                                          merge_action=False)
+    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+                                                     mask_transformer=transformer,
+                                                     do_flatten=do_flatten, use_ast=use_ast,
+                                                     do_multi_step_sample=do_multi_step_sample,
+                                                     merge_action=False)
     # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
     #                                                           mask_transformer=transformer, do_flatten=do_flatten,
     #                                                           use_ast=use_ast,

@@ -46,6 +46,9 @@ class IterateErrorDataSet(CustomerDataSet):
                 self.data_df = self.filter_df(data_df)
             else:
                 self.data_df = data_df
+            print("before filter p2 out, dataset size is:{}".format(len(self.data_df)))
+            self.data_df = self._filter_p2_out(self.data_df)
+            print("after filter p2 out, dataset size is:{}".format(len(self.data_df)))
             self._samples = [row for i, row in self.data_df.iterrows()]
             if self.transform:
                 self._samples = show_process_map(self.transform, self._samples)
@@ -115,6 +118,18 @@ class IterateErrorDataSet(CustomerDataSet):
             df = df[df['error_token_name_list'].map(test_parse_ast_code_graph) < 700]
 
         return df
+
+    def _filter_p2_out(self, df):
+        def is_no(row):
+            try:
+                d = self._get_raw_sample(row)
+            except Exception as e:
+                return False
+            if d['copy_length'] <= d['p2_target']:
+                return False
+            else:
+                return True
+        return df[df.apply(is_no, raw=True, axis=1)]
 
     def _get_raw_sample(self, row):
         # error_tokens = self.vocabulary.parse_text_without_pad([[k.value for k in self.data_df.iloc[index]["tokens"]]],
@@ -566,11 +581,11 @@ class SamplePackedDataset(CustomerDataSet):
 
 
 def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
-                                          do_multi_step_sample=False):
+                                          do_multi_step_sample=False, merge_action=True):
     if is_debug:
-        data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten)
+        data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten, merge_action=merge_action)
     else:
-        data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=do_flatten)
+        data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=do_flatten, merge_action=merge_action)
     # if use_ast:
     #     vocabulary = load_graph_vocabulary(vocabulary)
 
