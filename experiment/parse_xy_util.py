@@ -317,7 +317,8 @@ def parse_error_tokens_and_action_map_encoder_copy(df, data_type, keyword_vocab,
 CODE_BEGIN = '<BEGIN>'
 CODE_END = '<END>'
 
-def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_fn=None, tokenize_fn=None):
+def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_fn=None, tokenize_fn=None,
+                                             merge_action=True):
     df['res'] = ''
     df['ac_code_obj'] = df['ac_code'].map(tokenize_fn)
     df = df[df['ac_code_obj'].map(lambda x: x is not None)].copy()
@@ -345,7 +346,7 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
     df['offset_action_token_list'] = df['action_token_list'].map(action_offset_with_begin_and_end)
     print('after action_offset_with_begin_and_end: {}'.format(len(df)))
 
-    df['action_part_list'] = df['offset_action_token_list'].map(split_actions)
+    df['action_part_list'] = df['offset_action_token_list'].map(create_split_actions_fn(merge_action=merge_action))
     print('after split_actions : {}'.format(len(df)))
 
     # generate action part pos list
@@ -570,26 +571,30 @@ def check_neighbor_two_action(before_action, after_action):
     return False
 
 
-def split_actions(ac_to_error_action_list):
-    """
+def create_split_actions_fn(merge_action=True):
+    def split_actions(ac_to_error_action_list):
+        """
 
-    :param ac_to_error_action_list: action list has been sorted
-    :return:
-    """
-    action_part_list = []
-    last_action = None
-    for i in range(len(ac_to_error_action_list)-1, -1, -1):
-        cur_action = ac_to_error_action_list[i]
-        if last_action is None:
-            action_part_list = [[cur_action]] + action_part_list
-        else:
-            is_neighbor = check_neighbor_two_action(cur_action, last_action)
-            if is_neighbor:
-                action_part_list[0] = [cur_action] + action_part_list[0]
-            else:
+        :param ac_to_error_action_list: action list has been sorted
+        :return:
+        """
+        if not merge_action:
+            return [[m] for m in ac_to_error_action_list]
+        action_part_list = []
+        last_action = None
+        for i in range(len(ac_to_error_action_list)-1, -1, -1):
+            cur_action = ac_to_error_action_list[i]
+            if last_action is None:
                 action_part_list = [[cur_action]] + action_part_list
-        last_action = cur_action
-    return action_part_list
+            else:
+                is_neighbor = check_neighbor_two_action(cur_action, last_action)
+                if is_neighbor:
+                    action_part_list[0] = [cur_action] + action_part_list[0]
+                else:
+                    action_part_list = [[cur_action]] + action_part_list
+            last_action = cur_action
+        return action_part_list
+    return split_actions
 
 
 def extract_action_part_start_pos_fn(action_bias_map):

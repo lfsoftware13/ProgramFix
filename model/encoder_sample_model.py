@@ -223,6 +223,7 @@ class GraphEncoder(nn.Module):
                 adjacent_matrix,
                 input_seq,
                 copy_length,
+                p1_target=None,
                 ):
         input_seq = self.embedding(input_seq)
         input_seq = self.size_transform(input_seq)
@@ -245,7 +246,19 @@ class GraphEncoder(nn.Module):
             p1 = self.p1_pointer_network(input_seq, query=self.query_tensor, mask=p1_pointer_mask)
             p1_state = torch.sum(F.softmax(p1, dim=-1).unsqueeze(-1) * input_seq, dim=1)
             p2_query = self.up_data_cell(p1_state, self.query_tensor.unsqueeze(0).expand(batch_size, -1))
-            p2 = self.p2_pointer_network(input_seq, query=torch.unsqueeze(p2_query, dim=1), mask=p2_pointer_mask)
+            if self.p2_type == 'static':
+                p2 = self.p2_pointer_network(input_seq, query=torch.unsqueeze(p2_query, dim=1), mask=p2_pointer_mask)
+            elif self.p2_type == 'step':
+                p2_seq = torch.unbind(input_seq)
+                if p1_target is None:
+                    p1_target = torch.argmax(p1, dim=1)
+                p2_seq = [seq[p1_t+1:p1_t+1+self.p2_step_length] for seq, p1_t in zip(p2_seq, p1_target)]
+                # p2_seq = [torch.cat((seq, torch.zeros(self.p2_step_length-len(seq)).to(input_seq.device))).unsqueeze(0) for seq in p2_seq]
+                p2_seq = [seq.unsqueeze(0) for seq in p2_seq]
+                p2_seq = torch.cat(p2_seq, dim=0)
+                p2 = self.p2_pointer_network(p2_seq, query=torch.unsqueeze(p2_query, dim=1))
+            else:
+                raise ValueError("No p2_type is:{}".format(self.p2_type))
         else:
             raise ValueError("No point type is:{}".format(self.pointer_type))
 
@@ -370,7 +383,13 @@ class EncoderSampleModel(nn.Module):
                        is_copy_target,
                        ):
         batch_size = input_seq.shape[0]
-        p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, input_seq, copy_length)
+        if self.p2_type == 'static':
+            p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, input_seq, copy_length)
+        elif self.p2_type == 'step':
+            p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, input_seq, copy_length, p1_target=p1_target)
+            p2_target = p1_target + p2_target + 1
+        else:
+            raise ValueError("No p2_type is:{}".format(self.p2_type))
         slice_state = self.slice_encoder(p1_target, p2_target, input_seq, copy_length)\
             .permute(1, 0, 2)\
             .contiguous()\
@@ -399,6 +418,8 @@ class EncoderSampleModel(nn.Module):
         p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, ori_input_seq, copy_length)
         p1 = torch.squeeze(torch.topk(F.log_softmax(p1_o, dim=-1), k=1, dim=-1)[1], dim=-1)
         p2 = torch.squeeze(torch.topk(F.log_softmax(p2_o, dim=-1), k=1, dim=-1)[1], dim=-1)
+        if self.p2_type == 'step':
+            p2 = p1 + p2 + 1
         slice_state = self.slice_encoder(p1, p2, input_seq, copy_length) \
             .permute(1, 0, 2) \
             .contiguous() \
@@ -612,10 +633,12 @@ def create_loss_fn(ignore_id):
     return loss_fn
 
 
-def create_parse_target_batch_data(ignore_token):
+def create_parse_target_batch_data(ignore_token, p2_type='static'):
     def parse_target_batch_data(batch_data):
         p1 = to_cuda(torch.LongTensor(batch_data['p1_target']))
         p2 = to_cuda(torch.LongTensor(batch_data['p2_target']))
+        if p2_type == 'step':
+            p2 = p2 - p1 - 1
         is_copy = to_cuda(torch.FloatTensor(PaddedList(batch_data['is_copy_target'], fill_value=ignore_token)))
         copy_target = to_cuda(torch.LongTensor(PaddedList(batch_data['copy_target'], fill_value=ignore_token)))
         sample_target = to_cuda(torch.LongTensor(PaddedList(batch_data['sample_target'], fill_value=ignore_token)))
@@ -625,7 +648,7 @@ def create_parse_target_batch_data(ignore_token):
     return parse_target_batch_data
 
 
-def create_parse_input_batch_data_fn(use_ast=False):
+def create_parse_input_batch_data_fn(use_ast=False, p2_type='static'):
     def parse_input_batch_data_fn(batch_data, do_sample):
         def to_long(x):
             return to_cuda(torch.LongTensor(x))
@@ -657,6 +680,8 @@ def create_parse_input_batch_data_fn(use_ast=False):
         if not do_sample:
             p1_target = to_long(batch_data['p1_target'])
             p2_target = to_long(batch_data['p2_target'])
+            if p2_type == 'step':
+                p2_target = p2_target - p1_target - 1
             target = to_long(PaddedList(batch_data['target']))
             is_copy_target = to_long(PaddedList(batch_data['is_copy_target']))
             batch_size = len(batch_data['is_copy_target'])
@@ -673,10 +698,10 @@ def create_parse_input_batch_data_fn(use_ast=False):
     return parse_input_batch_data_fn
 
 
-def create_output_ids_fn(end_id):
+def create_output_ids_fn(end_id, p2_type='static'):
     def create_output_ids(model_output, model_input, do_sample=False):
         output_record_list = create_records_all_output(model_input=model_input, model_output=model_output,
-                                                       do_sample=do_sample)
+                                                       do_sample=do_sample, p2_type=p2_type)
         p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = output_record_list
 
         sample_output_ids_list = sample_output_ids.tolist()
@@ -726,11 +751,11 @@ def expand_output_and_target_fn(ignore_token):
     return expand_output_and_target
 
 
-def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabulary=None, use_ast=False):
+def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabulary=None, use_ast=False, p2_type='static'):
     def create_multi_step_next_input_batch(input_data, model_input, model_output, continue_list, direct_output=False):
         # output_record_list = create_records_all_output(model_input=model_input, model_output=model_output, do_sample=True)
         output_record_list = create_records_all_output_for_beam(model_input=model_input, model_output=model_output,
-                                                                do_sample=True, direct_output=direct_output)
+                                                                do_sample=True, direct_output=direct_output, p2_type=p2_type)
         p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = output_record_list
 
         cur_error_position_data = torch.ge(p1, p2).tolist()
@@ -808,7 +833,7 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
     return create_multi_step_next_input_batch
 
 
-def create_records_all_output(model_input, model_output, do_sample=False):
+def create_records_all_output(model_input, model_output, do_sample=False, p2_type='static'):
     p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens = model_output
     if do_sample:
         compatible_tokens = output_compatible_tokens
@@ -816,6 +841,8 @@ def create_records_all_output(model_input, model_output, do_sample=False):
         compatible_tokens = model_input[8]
     p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
     p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
+    if p2_type == 'step':
+        p2 = p1 + p2 + 1
     # is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
     is_copy = torch.sigmoid(is_copy) > 0.5
     # is_copy = torch.squeeze(is_copy, dim=-1) > 0.5
@@ -829,7 +856,7 @@ def create_records_all_output(model_input, model_output, do_sample=False):
     return p1, p2, is_copy, copy_ids, sample_output, sample_output_ids
 
 
-def create_records_all_output_for_beam(model_input, model_output, do_sample=False, direct_output=False):
+def create_records_all_output_for_beam(model_input, model_output, do_sample=False, direct_output=False, p2_type='static'):
     p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens = model_output
     if do_sample:
         compatible_tokens = output_compatible_tokens
@@ -837,6 +864,8 @@ def create_records_all_output_for_beam(model_input, model_output, do_sample=Fals
         compatible_tokens = model_input[8]
     p1 = torch.squeeze(torch.topk(F.softmax(p1_o, dim=-1), dim=-1, k=1)[1], dim=-1)
     p2 = torch.squeeze(torch.topk(F.softmax(p2_o, dim=-1), dim=-1, k=1)[1], dim=-1)
+    if p2_type == 'step':
+        p2 = p2 + p1 + 1
     if not direct_output:
         # is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
         is_copy = torch.sigmoid(is_copy) > 0.5

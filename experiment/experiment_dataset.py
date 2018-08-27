@@ -539,8 +539,8 @@ class FlattenRandomIterateRecords:
         if (only_first is not None and only_first) or \
                 (only_first is None and self.only_first):
             self.random_i = 0
-        # self.random_i = random.randint(0, self.iterate_num - 1)
-        self.random_i = 0
+        self.random_i = random.randint(0, self.iterate_num - 1)
+        # self.random_i = 0
 
 
 class SamplePackedDataset(CustomerDataSet):
@@ -587,11 +587,11 @@ def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer
 
 
 def load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
-                                          do_multi_step_sample=False):
+                                          do_multi_step_sample=False, merge_action=True):
     if is_debug:
-        data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False)
+        data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, merge_action=merge_action)
     else:
-        data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=False)
+        data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=False, merge_action=merge_action)
     # if use_ast:
     #     vocabulary = load_graph_vocabulary(vocabulary)
 
