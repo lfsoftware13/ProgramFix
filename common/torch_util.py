@@ -597,5 +597,37 @@ def stable_log(input, e=10e-5):
     return output
 
 
+def remove_last_item_in_sequence(x, x_length, k=1):
+    """
+
+    :param x: [batch, seq, ...]
+    :param l: [batch]
+    :param k:
+    :return:
+    """
+    x_list = torch.unbind(x, dim=0)
+    remain_x_list = [torch.cat([one[:l - k], one[l:]], dim=0) for one, l in zip(x_list, x_length)]
+    o = torch.stack(remain_x_list, dim=0)
+    return o
+
+
+def reverse_tensor(x, x_length):
+    x_list = torch.unbind(x, dim=0)
+    reverse_list = []
+    for one, l in zip(x_list, x_length):
+        idx = to_cuda(torch.arange(l.item()-1, -1, -1).long())
+        r_one = one.index_select(dim=0, index=idx)
+        reverse_list += [torch.cat([r_one, one[l:]], dim=0)]
+    o = torch.stack(reverse_list, dim=0)
+    return o
+
+
 if __name__ == '__main__':
-    a = []
+    a = [[0, 1, 2, 3, 4, 5],
+         [0, 1, 2, 3, 4, 5],
+         [0, 1, 2, 3, 4, 5],
+         [0, 1, 2, 3, 4, 5]]
+    a_t = torch.Tensor(a)
+    l = torch.LongTensor([2, 3, 4, 6])
+    r_a = remove_last_item_in_sequence(a_t, l, k=1)
+    print(r_a)

@@ -688,3 +688,32 @@ class CompileResultEvaluate(Evaluator):
         return self.__str__()
 
 
+class SensibilityRNNEvaluator(Evaluator):
+    def __init__(self, ignore_token=None):
+        self.ignore_token = ignore_token
+        self.forward_accuracy = TokenAccuracy(ignore_token=ignore_token)
+        self.backward_accuracy = TokenAccuracy(ignore_token=ignore_token)
+
+    def add_result(self, output_ids, model_output, model_target, model_input, batch_data):
+        forward_ids = torch.squeeze(torch.topk(F.log_softmax(model_output[0], dim=-1), k=1, dim=-1)[1], dim=-1)
+        backward_ids = torch.squeeze(torch.topk(F.log_softmax(model_output[1], dim=-1), k=1, dim=-1)[1], dim=-1)
+        for_acc = self.forward_accuracy.add_result(forward_ids, model_target[0])
+        back_acc = self.backward_accuracy.add_result(backward_ids, model_target[1])
+        return 'SensibilityRNNEvaluator forward_accuracy: {}, backward_accuracy: {}'.format(for_acc, back_acc)
+
+    def clear_result(self):
+        self.forward_accuracy.clear_result()
+        self.backward_accuracy.clear_result()
+
+    def get_result(self):
+        return self.forward_accuracy.get_result(), self.backward_accuracy.get_result()
+
+    def __str__(self):
+        for_acc, back_acc = self.get_result()
+        return 'SensibilityRNNEvaluator forward_accuracy: {}, backward_accuracy: {}'.format(for_acc, back_acc)
+
+    def __repr__(self):
+        return self.__str__()
+
+
+

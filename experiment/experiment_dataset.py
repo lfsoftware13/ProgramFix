@@ -638,6 +638,40 @@ def load_deepfix_ac_code_for_generate_dataset(is_debug, vocabulary, mask_transfo
     return dataset
 
 
+def load_deepfix_ac_code_for_sensibility_rnn(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
+                                          do_multi_step_sample=False):
+    if is_debug:
+        data_dict_list = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False)
+    else:
+        data_dict_list = load_fake_deepfix_dataset_iterate_error_data(do_flatten=False)
+
+    def convert_error_to_ac_dict(data_dict):
+        new_dict = {}
+        new_dict['id'] = data_dict['id']
+        new_dict['error_token_id_list'] = data_dict['ac_code_ids']
+        new_dict['includes'] = data_dict['includes']
+        new_dict['distance'] = data_dict['distance']
+        new_dict['error_token_name_list'] = data_dict['ac_code_name_with_labels']
+        return new_dict
+
+    ac_data_dict_list = [convert_error_to_ac_dict(data_dict) for data_dict in data_dict_list]
+
+    from model.sensibility_baseline.rnn_pytorch import SensibilityRNNDataset
+    datasets = [SensibilityRNNDataset(pd.DataFrame(ac_data_dict), vocabulary, 'ac_code',
+                                             transformer_vocab_slk=mask_transformer, do_flatten=True,
+                                             use_ast=use_ast, do_multi_step_sample=do_multi_step_sample)
+               for ac_data_dict in ac_data_dict_list]
+
+    info_output = "There are {} parsed data in the {} dataset".format(len(datasets[0]), 'train')
+    print(info_output)
+    info_output = "There are {} parsed data in the {} dataset".format(len(datasets[1]), 'valid')
+    print(info_output)
+    info_output = "There are {} parsed data in the {} dataset".format(len(datasets[2]), 'test')
+    print(info_output)
+    datasets = datasets + [None]
+    return datasets
+
+
 def load_addition_generate_iterate_solver_train_dataset_fn(vocabulary, mask_transformer, do_flatten=False,
                                                         use_ast=False, do_multi_step_sample=False):
     def load_addition_generate_iterate_solver_train_dataset(df, id_to_prog_dict, no_id_to_program_dict=False):

@@ -35,8 +35,8 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
-        # torch_util.load_model(m, path)
+        # torch_util.load_model(m, path, map_location={'cuda:1': 'cuda:0'})
+        torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
         print("create new model")
@@ -717,7 +717,7 @@ if __name__ == '__main__':
     create_output_ids_fn = p_config['create_output_ids_fn']
     vocabulary = p_config['vocabulary']
 
-    load_addition_generate_iterate_solver_train_dataset_fn = p_config['load_addition_generate_iterate_solver_train_dataset_fn']
+    load_addition_generate_iterate_solver_train_dataset_fn = p_config.get('load_addition_generate_iterate_solver_train_dataset_fn', None)
     addition_train = p_config.get('addition_train', False)
 
     do_multi_step_sample_evaluate = p_config['do_multi_step_sample_evaluate']
