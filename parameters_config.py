@@ -2,7 +2,7 @@ from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens,
     SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME
 from config import SLK_SAMPLE_DBPATH, DATA_RECORDS_DEEPFIX_DBPATH
 from common.evaluate_util import SLKOutputAccuracyAndCorrect, EncoderCopyAccuracyAndCorrect, \
-    ErrorPositionAndValueAccuracy
+    ErrorPositionAndValueAccuracy, SensibilityRNNEvaluator
 from common.opt import OpenAIAdam
 from common.pycparser_util import tokenize_by_clex_fn
 from model.encoder_sample_model import create_parse_input_batch_data_fn, create_records_all_output
@@ -1297,7 +1297,7 @@ def encoder_sample_data_generate2(is_debug):
     }
 
 
-def sensibility_rnn_config(is_debug):
+def sensibility_rnn_config1(is_debug):
     vocabulary = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
                                                         end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
                                                         addition_tokens=['<PAD>'])
@@ -1310,10 +1310,75 @@ def sensibility_rnn_config(is_debug):
     if use_ast:
         from experiment.experiment_dataset import load_graph_vocabulary
         vocabulary = load_graph_vocabulary(vocabulary)
+    do_multi_step_sample = False
+
+    ignore_id = -1
+    max_length = 500
+    epoches = 120
+    batch_size = 32
 
     from experiment.experiment_dataset import load_deepfix_ac_code_for_generate_dataset
-    ac_dataset = load_deepfix_ac_code_for_generate_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                           mask_transformer=transformer, do_flatten=do_flatten,
+    from experiment.experiment_dataset import load_deepfix_ac_code_for_sensibility_rnn
+    from model.sensibility_baseline.rnn_pytorch import rnn_parse_input_batch_data_fn
+    from model.sensibility_baseline.rnn_pytorch import rnn_parse_target_batch_data_fn
+    from model.sensibility_baseline.rnn_pytorch import SensibilityBiRnnModel
+    from model.sensibility_baseline.rnn_pytorch import create_loss_function
+    datasets = load_deepfix_ac_code_for_sensibility_rnn(is_debug=is_debug, vocabulary=vocabulary,
+                                                           mask_transformer=None, do_flatten=True,
                                                            use_ast=use_ast,
-                                                           do_multi_step_sample=True)
-    pass
+                                                           do_multi_step_sample=False)
+    train_len = len(datasets[0]) if datasets[0] is not None else 100
+
+    from model.sensibility_baseline.rnn_pytorch import create_output_fn
+    return {
+        'name': 'sensibility_rnn_config1',
+        'save_name': 'sensibility_rnn_config1.pkl',
+        'load_model_name': 'sensibility_rnn_config1.pkl',
+
+        'save_data_fn': lambda x: x,
+
+        'model_fn': SensibilityBiRnnModel,
+        'model_dict':
+            {"vocabulary_size": vocabulary.vocabulary_size,
+             "embedding_dim": 400,
+             "hidden_size": 400,
+             'encoder_params': {'vocab_size': vocabulary.vocabulary_size,
+                                   'max_len': max_length, 'input_size': 400,
+                                   'input_dropout_p': 0.2, 'dropout_p': 0.2,
+                                   'n_layers': 3, 'bidirectional': False, 'rnn_cell': 'gru',
+                                   'variable_lengths': False, 'embedding': None,
+                                   'update_embedding': True,
+                                 },
+             },
+
+        'do_sample_evaluate': False,
+
+        'do_multi_step_sample_evaluate': do_multi_step_sample,
+        'create_multi_step_next_input_batch_fn': None,
+        'max_step_times': 10,
+        'compile_file_path': '/dev/shm/main.c',
+        'target_file_path': '/dev/shm/main.out',
+        'extract_includes_fn': lambda x: x['includes'],
+        'multi_step_sample_evaluator': [],
+        'print_output': False,
+        'print_output_fn': None,
+
+        'vocabulary': vocabulary,
+        'parse_input_batch_data_fn': rnn_parse_input_batch_data_fn(),
+        'parse_target_batch_data_fn': rnn_parse_target_batch_data_fn(ignore_id),
+        'expand_output_and_target_fn': None,
+        'create_output_ids_fn': create_output_fn,
+        'train_loss': create_loss_function(ignore_id),
+        'evaluate_object_list': [SensibilityRNNEvaluator(ignore_token=ignore_id)],
+
+        'epcohes': epoches,
+        'start_epoch': 0,
+        'epoch_ratio': 1,
+        'learning_rate': 6.25e-5,
+        'batch_size': batch_size,
+        'clip_norm': 1,
+        'optimizer': OpenAIAdam,
+        'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
+                             't_total': epoches * train_len // batch_size, 'max_grad_norm': 10},
+        'data': datasets,
+    }
