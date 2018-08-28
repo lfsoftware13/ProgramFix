@@ -41,10 +41,10 @@ def test_config1(is_debug):
     datasets = load_dataset(is_debug, vocabulary, mask_transformer=transformer)
     # datasets = load_sample_save_dataset(is_debug, vocabulary, mask_transformer=transformer)
 
-    epoches=40
-    train_len = len(datasets[0])
-    batch_size = 2
-    clip_norm = 1
+    epoches = 80
+    train_len = len(datasets[0]) if datasets[0] is not None else 100
+    batch_size = 10
+    clip_norm = 10
 
     return {
         'name': 'test',
@@ -57,7 +57,7 @@ def test_config1(is_debug):
                        'end_label': vocabulary.word_to_id(vocabulary.end_tokens[0]), 'dropout_p': 0.2,
                        'MAX_LENGTH': 500, 'atte_position_type': 'content', 'mask_transformer': transformer},
 
-        'do_sample_evaluate': False,
+        'do_sample_evaluate': True,
 
         'vocabulary': vocabulary,
         # 'transformer': transformer,
@@ -67,6 +67,17 @@ def test_config1(is_debug):
         'create_output_ids_fn': create_output_id_fn,
         'train_loss': loss_fn,
         'evaluate_object_list': [SLKOutputAccuracyAndCorrect(ignore_token=-1)],
+
+        'do_multi_step_sample_evaluate': False,
+        'max_step_times': 1,
+        'create_multi_step_next_input_batch_fn': None,
+        'compile_file_path': '/dev/shm/main.c',
+        'target_file_path': '/dev/shm/main.out',
+        'extract_includes_fn': lambda x: x['includes'],
+        'multi_step_sample_evaluator': [],
+        'print_output': False,
+        'print_output_fn': None,
+
 
         'ac_copy_train': False,
         'ac_copy_radio': 0.2,
@@ -82,6 +93,116 @@ def test_config1(is_debug):
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,
         'clip_norm': 1,
+        'optimizer': OpenAIAdam,
+        'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
+                           't_total': epoches * train_len//batch_size, 'max_grad_norm': clip_norm},
+        'data': datasets
+
+    }
+
+
+def pointer_network_with_ggnn_encoder(is_debug):
+    from model.one_pointer_copy_self_attention_seq2seq_model_gammar_mask_refactor import \
+        create_parse_rnn_input_batch_data_fn, create_parse_target_batch_data, create_combine_loss_fn, create_output_ids, \
+        load_dataset, RNNPointerNetworkModelWithSLKMask, slk_expand_output_and_target
+
+    vocabulary = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                        end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                        addition_tokens=['<PAD>'])
+    begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+    end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+    inner_begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[1])
+    inner_end_id = vocabulary.word_to_id(vocabulary.end_tokens[1])
+    pad_id = vocabulary.word_to_id(vocabulary.addition_tokens[0])
+    use_ast = True
+    if use_ast:
+        from experiment.experiment_dataset import load_graph_vocabulary
+        vocabulary = load_graph_vocabulary(vocabulary)
+    # vocabulary = load_vocabulary()
+    tokenize_fn = tokenize_by_clex_fn()
+    # transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
+    transformer = None
+
+    parse_rnn_input_batch_data = create_parse_rnn_input_batch_data_fn(vocab=vocabulary, use_ast=use_ast)
+    parse_target_batch_data = create_parse_target_batch_data()
+    create_output_id_fn = create_output_ids
+    loss_fn = create_combine_loss_fn(average_value=True)
+    datasets = load_dataset(is_debug, vocabulary, mask_transformer=transformer, data_type='deepfix', use_ast=use_ast)
+    # datasets = load_sample_save_dataset(is_debug, vocabulary, mask_transformer=transformer)
+
+    epoches = 80
+    train_len = len(datasets[0]) if datasets[0] is not None else 100
+    batch_size = 10
+    clip_norm = 10
+    max_length = 500
+
+    return {
+        'name': 'pointer_network_with_ggnn_encoder_config1_position_embedding',
+        'save_name': 'pointer_network_with_ggnn_encoder_config1_position_embedding.pkl',
+        'load_model_name': 'pointer_network_with_ggnn_encoder_config1_position_embedding.pkl',
+
+        'model_fn': RNNPointerNetworkModelWithSLKMask,
+        'model_dict':
+            {'vocabulary_size': vocabulary.vocabulary_size, 'hidden_size': 400,
+             'num_layers': 3, 'start_label': vocabulary.word_to_id(vocabulary.begin_tokens[0]),
+             'end_label': vocabulary.word_to_id(vocabulary.end_tokens[0]),
+             'dropout_p': 0.2,
+             'MAX_LENGTH': 500,
+             'atte_position_type': 'content',
+             'mask_transformer': transformer,
+             'graph_embedding': 'mixed',
+             'pointer_type': 'query',
+             'no_position_embedding': False,
+             'position_embedding_length': 1000,
+             'graph_parameter': {"rnn_parameter": {'vocab_size': vocabulary.vocabulary_size,
+                                                   'max_len': max_length, 'input_size': 400,
+                                                   'input_dropout_p': 0.2, 'dropout_p': 0.2,
+                                                   'n_layers': 1, 'bidirectional': True, 'rnn_cell': 'gru',
+                                                   'variable_lengths': False, 'embedding': None,
+                                                   'update_embedding': True, },
+                                 "graph_type": "ggnn",
+                                 "graph_itr": 3,
+                                 "dropout_p": 0.2,
+                                 "mask_ast_node_in_rnn": False}
+             },
+
+
+        'do_sample_evaluate': False,
+
+        'vocabulary': vocabulary,
+        # 'transformer': transformer,
+        'parse_input_batch_data_fn': parse_rnn_input_batch_data,
+        'parse_target_batch_data_fn': parse_target_batch_data,
+        'expand_output_and_target_fn': slk_expand_output_and_target,
+        'create_output_ids_fn': create_output_id_fn,
+        'train_loss': loss_fn,
+        'evaluate_object_list': [SLKOutputAccuracyAndCorrect(ignore_token=-1, do_extract_evaluate=True)],
+
+        'do_multi_step_sample_evaluate': False,
+        'max_step_times': 1,
+        'create_multi_step_next_input_batch_fn': None,
+        'compile_file_path': '/dev/shm/main.c',
+        'target_file_path': '/dev/shm/main.out',
+        'extract_includes_fn': lambda x: x['includes'],
+        'multi_step_sample_evaluator': [],
+        'print_output': False,
+        'print_output_fn': None,
+
+
+        'ac_copy_train': False,
+        'ac_copy_radio': 0.2,
+
+        'do_sample_and_save': False,
+        'add_data_record_fn': create_save_sample_data(vocabulary),
+        'db_path': SLK_SAMPLE_DBPATH,
+        'table_basename': SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME,
+
+        'epcohes': epoches,
+        'start_epoch': 0,
+        'epoch_ratio': 1,
+        'learning_rate': 6.25e-5,
+        'batch_size': batch_size,
+        'clip_norm': clip_norm,
         'optimizer': OpenAIAdam,
         'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
                            't_total': epoches * train_len//batch_size, 'max_grad_norm': clip_norm},
@@ -633,7 +754,7 @@ def encoder_sample_config4(is_debug):
     tokenize_fn = tokenize_by_clex_fn()
     transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
 
-    batch_size = 6
+    batch_size = 10
     epoches = 80
     ignore_id = -1
     max_length = 500
@@ -772,7 +893,7 @@ def encoder_sample_config4(is_debug):
         'ac_copy_radio': 0.2,
 
         'epcohes': epoches,
-        'start_epoch': 0,
+        'start_epoch': 8,
         'epoch_ratio': epoch_ratio,
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,

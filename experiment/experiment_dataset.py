@@ -125,6 +125,8 @@ class IterateErrorDataSet(CustomerDataSet):
                 d = self._get_raw_sample(row)
             except Exception as e:
                 return False
+            if self.do_multi_step_sample:
+                return True
             if d['copy_length'] <= d['p2_target']:
                 return False
             else:

@@ -254,6 +254,16 @@ def parse_error_tokens_and_action_map(df, data_type, keyword_vocab, sort_fn=None
 
     get_first_fn = lambda x: x[0]
     df['error_code_word_id'] = df['token_id_list'].map(get_first_fn)
+    df['error_code_words'] = df['token_name_list'].map(get_first_fn)
+
+    # do check multi token action
+    check_multi_token_action = True
+    if check_multi_token_action:
+        print('before check_multi_token_action: {}'.format(len(df)))
+        check_action_fn = lambda name_list: check_multi_action(name_list, tokenize_fn, has_begin_end_label=False)
+        df['multi_action_res'] = df['token_name_list'].map(check_action_fn)
+        df = df[df['multi_action_res']]
+        print('after check_multi_token_action: {}'.format(len(df)))
 
     create_token_map_by_action_fn = lambda one: create_token_map_by_action(one['error_code_word_id'], one['action_list'])
     df['token_map'] = df.apply(create_token_map_by_action_fn, raw=True, axis=1)
@@ -264,12 +274,15 @@ def parse_error_tokens_and_action_map(df, data_type, keyword_vocab, sort_fn=None
     print('after error_mask id: ', len(df.index))
 
     df['is_copy'] = df.apply(create_is_copy_for_ac_tokens, raw=True, axis=1)
+    df = df[df['is_copy'].map(lambda x: x is not None)]
+    print('after is_copy: ', len(df.index))
 
     df['pointer_map'] = df.apply(create_one_pointer_map_for_ac_tokens, raw=True, axis=1)
 
     df['distance'] = df['action_list'].map(len)
 
-    return df['error_code_word_id'], df['ac_code_word_id'], df['token_map'], df['error_mask'], df['is_copy'], df['pointer_map'], df['distance']
+    return df['error_code_word_id'], df['ac_code_word_id'], df['token_map'], df['error_mask'], df['is_copy'], \
+           df['pointer_map'], df['distance'], df['error_code_words']
 
 
 def parse_error_tokens_and_action_map_encoder_copy(df, data_type, keyword_vocab, sort_fn=None, tokenize_fn=None,
@@ -409,7 +422,7 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
            df['ac_code_name_with_labels']
 
 
-def check_multi_action(token_names_list, tokenize_fn):
+def check_multi_action(token_names_list, tokenize_fn, has_begin_end_label=True):
     def check_one_multi_action(token_names_without_label):
         code = ' '.join(token_names_without_label)
         new_tokens = tokenize_fn(code)
@@ -422,7 +435,10 @@ def check_multi_action(token_names_list, tokenize_fn):
             if o != n:
                 return False
         return True
-    check_res = [check_one_multi_action(names[1:-1]) for names in token_names_list]
+    if has_begin_end_label:
+        check_res = [check_one_multi_action(names[1:-1]) for names in token_names_list]
+    else:
+        check_res = [check_one_multi_action(names[:]) for names in token_names_list]
     for r in check_res:
         if not r:
             return False
@@ -807,10 +823,7 @@ def create_tokens_error_mask(tokens, action_list):
                 if real_pos < len(token_error_mask):
                     token_error_mask[real_pos] = 1
                 if (real_pos-1) >= 0:
-                    try:
-                        token_error_mask[real_pos-1] = 1
-                    except Exception as e:
-                        print(token_error_mask)
+                    token_error_mask[real_pos-1] = 1
             elif act_type == DELETE:
                 real_pos = int((act_pos-1)/2 + bias)
                 token_error_mask[real_pos] = 1
@@ -827,7 +840,10 @@ def create_is_copy_for_ac_tokens(one):
     ac_code_obj = one['ac_code_obj']
     action_token_list = json.loads(one['action_character_list'])
 
-    is_copy_label = create_copy_for_ac_tokens(ac_code_obj, action_token_list)
+    try:
+        is_copy_label = create_copy_for_ac_tokens(ac_code_obj, action_token_list)
+    except Exception as e:
+        return None
     return is_copy_label
 
 

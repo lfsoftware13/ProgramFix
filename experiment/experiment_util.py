@@ -39,12 +39,22 @@ def load_grammar_sample_common_error_data():
 
 
 @disk_cache(basename='load_common_error_data', directory=CACHE_DATA_PATH)
-def load_common_error_data(addition_infomation=False):
-    vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>', addition_tokens=['<GAP>'])
-    train, vaild, test = read_fake_common_c_error_dataset_with_limit_length(MAX_TOKEN_LENGTH)
-    train = convert_c_code_fields_to_cpp_fields(train)
-    vaild = convert_c_code_fields_to_cpp_fields(vaild)
-    test = convert_c_code_fields_to_cpp_fields(test)
+def load_common_error_data(addition_infomation=False, data_type=None):
+    if data_type == 'deepfix':
+        vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                       end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                       addition_tokens=['<PAD>'])
+
+        train, vaild, test = read_fake_common_deepfix_error_dataset_with_limit_length(500)
+        train = convert_c_code_fields_to_cpp_fields(train, convert_include=False)
+        vaild = convert_c_code_fields_to_cpp_fields(vaild, convert_include=False)
+        test = convert_c_code_fields_to_cpp_fields(test, convert_include=False)
+    else:
+        vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>', addition_tokens=['<GAP>'])
+        train, vaild, test = read_fake_common_c_error_dataset_with_limit_length(MAX_TOKEN_LENGTH)
+        train = convert_c_code_fields_to_cpp_fields(train)
+        vaild = convert_c_code_fields_to_cpp_fields(vaild)
+        test = convert_c_code_fields_to_cpp_fields(test)
 
     tokenize_fn = tokenize_by_clex_fn()
 
@@ -63,13 +73,16 @@ def load_common_error_data(addition_infomation=False):
 
     train_dict = {'error_code_word_id': train_data[0], 'ac_code_word_id': train_data[1],
                   'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'],
-                  'is_copy': train_data[4], 'pointer_map': train_data[5], 'distance': train_data[6]}
+                  'is_copy': train_data[4], 'pointer_map': train_data[5], 'distance': train_data[6],
+                  'error_code_word': train_data[7]}
     valid_dict = {'error_code_word_id': vaild_data[0], 'ac_code_word_id': vaild_data[1],
                   'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'],
-                  'is_copy': vaild_data[4], 'pointer_map': vaild_data[5], 'distance': vaild_data[6]}
+                  'is_copy': vaild_data[4], 'pointer_map': vaild_data[5], 'distance': vaild_data[6],
+                  'error_code_word': vaild_data[7]}
     test_dict = {'error_code_word_id': test_data[0], 'ac_code_word_id': test_data[1], 'token_map': test_data[2],
                  'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4],
-                 'pointer_map': test_data[5], 'distance': test_data[6]}
+                 'pointer_map': test_data[5], 'distance': test_data[6],
+                 'error_code_word': test_data[7]}
 
     if addition_infomation:
         train_dict = add_c_common_code_original_info(data_dict=train_dict, df=train)
@@ -87,12 +100,22 @@ def load_common_error_data(addition_infomation=False):
 
 
 # @disk_cache(basename='load_common_error_data_sample_100', directory=CACHE_DATA_PATH)
-def load_common_error_data_sample_100(addition_infomation=False):
-    vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>', addition_tokens=['<GAP>'])
-    train, vaild, test = read_fake_common_c_error_dataset_with_limit_length(MAX_TOKEN_LENGTH)
-    train = convert_c_code_fields_to_cpp_fields(train)
-    vaild = convert_c_code_fields_to_cpp_fields(vaild)
-    test = convert_c_code_fields_to_cpp_fields(test)
+def load_common_error_data_sample_100(addition_infomation=False, data_type=None):
+    if data_type == 'deepfix':
+        vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                       end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                       addition_tokens=['<PAD>'])
+
+        train, vaild, test = read_fake_common_deepfix_error_dataset_with_limit_length(500)
+        train = convert_c_code_fields_to_cpp_fields(train, convert_include=False)
+        vaild = convert_c_code_fields_to_cpp_fields(vaild, convert_include=False)
+        test = convert_c_code_fields_to_cpp_fields(test, convert_include=False)
+    else:
+        vocab = create_common_error_vocabulary(begin_tokens=['<BEGIN>'], end_tokens=['<END>'], unk_token='<UNK>', addition_tokens=['<GAP>'])
+        train, vaild, test = read_fake_common_c_error_dataset_with_limit_length(MAX_TOKEN_LENGTH)
+        train = convert_c_code_fields_to_cpp_fields(train)
+        vaild = convert_c_code_fields_to_cpp_fields(vaild)
+        test = convert_c_code_fields_to_cpp_fields(test)
 
     train = train.sample(100)
     vaild = vaild.sample(100)
@@ -115,13 +138,16 @@ def load_common_error_data_sample_100(addition_infomation=False):
 
     train_dict = {'error_code_word_id': train_data[0], 'ac_code_word_id': train_data[1],
                   'token_map': train_data[2], 'error_mask': train_data[3], 'includes': train['includes'],
-                  'is_copy': train_data[4], 'pointer_map': train_data[5], 'distance': train_data[6]}
+                  'is_copy': train_data[4], 'pointer_map': train_data[5], 'distance': train_data[6],
+                  'error_code_word':train_data[7]}
     valid_dict = {'error_code_word_id': vaild_data[0], 'ac_code_word_id': vaild_data[1],
                   'token_map': vaild_data[2], 'error_mask': vaild_data[3], 'includes': vaild['includes'],
-                  'is_copy': vaild_data[4], 'pointer_map': vaild_data[5], 'distance': vaild_data[6]}
+                  'is_copy': vaild_data[4], 'pointer_map': vaild_data[5], 'distance': vaild_data[6],
+                  'error_code_word': vaild_data[7]}
     test_dict = {'error_code_word_id': test_data[0], 'ac_code_word_id': test_data[1], 'token_map': test_data[2],
                  'error_mask': test_data[3], 'includes': test['includes'], 'is_copy': test_data[4],
-                 'pointer_map': test_data[5], 'distance': test_data[6]}
+                 'pointer_map': test_data[5], 'distance': test_data[6],
+                 'error_code_word': test_data[7]}
 
     if addition_infomation:
         train_dict = add_c_common_code_original_info(data_dict=train_dict, df=train)

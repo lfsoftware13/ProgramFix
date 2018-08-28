@@ -6,12 +6,14 @@ import torch
 import math
 import torch.nn.functional as F
 import pandas as pd
+from toolz.sandbox import unzip
 from torch.utils.data import Dataset
 from tqdm import tqdm
 import numpy as np
 import more_itertools
 
 import config
+from c_parser.ast_parser import parse_ast_code_graph
 from common import torch_util, util
 from common.problem_util import to_cuda
 from common.logger import init_a_file_logger, info
@@ -23,10 +25,12 @@ from common.util import data_loader, show_process_map, PaddedList, convert_one_t
     compile_c_code_by_gcc, create_token_set, create_token_mask_by_token_set, generate_mask, queued_data_loader, \
     CustomerDataSet, OrderedList
 from experiment.experiment_util import load_common_error_data, load_common_error_data_sample_100, \
-    create_addition_error_data, create_copy_addition_data, load_deepfix_error_data
+    create_addition_error_data, create_copy_addition_data, load_deepfix_error_data, \
+    load_fake_deepfix_dataset_iterate_error_data_sample_100, load_fake_deepfix_dataset_iterate_error_data
 from experiment.parse_xy_util import parse_output_and_position_map
 from model.base_attention import TransformEncoderModel, TransformDecoderModel, TrueMaskedMultiHeaderAttention, \
     register_hook, PositionWiseFeedForwardNet, is_nan, record_is_nan
+from model.encoder_sample_model import GraphEncoder
 from read_data.load_data_vocabulary import create_common_error_vocabulary
 from seq2seq.models import EncoderRNN, DecoderRNN
 from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
@@ -46,12 +50,14 @@ class CCodeErrorDataSet(CustomerDataSet):
                  set_type: str,
                  transform=None,
                  transformer_vocab_slk=None,
-                 no_filter=False):
+                 no_filter=False,
+                 use_ast=False, ):
         # super().__init__(data_df, vocabulary, set_type, transform, no_filter)
         self.set_type = set_type
         self.transform = transform
         self.vocabulary = vocabulary
         self.transformer = transformer_vocab_slk
+        self.use_ast = use_ast
         if data_df is not None:
             if not no_filter:
                 self.data_df = self.filter_df(data_df)
@@ -100,10 +106,11 @@ class CCodeErrorDataSet(CustomerDataSet):
                 res = None
             return res
 
-        print('before slk grammar: {}'.format(len(df)))
-        df['grammar_mask_list'] = df['ac_code_word_id'].map(filter_slk)
-        df = df[df['grammar_mask_list'].map(lambda x: x is not None)]
-        print('after slk grammar: {}'.format(len(df)))
+        if self.transformer is not None:
+            print('before slk grammar: {}'.format(len(df)))
+            df['grammar_mask_list'] = df['ac_code_word_id'].map(filter_slk)
+            df = df[df['grammar_mask_list'].map(lambda x: x is not None)]
+            print('after slk grammar: {}'.format(len(df)))
 
         return df
 
@@ -114,36 +121,45 @@ class CCodeErrorDataSet(CustomerDataSet):
         #                                                       use_position_label=True)[0]
         sample = dict(row)
         sample['error_tokens'] = row['error_code_word_id']
+        sample['error_tokens_name'] = row['error_code_word']
         sample['error_length'] = len(row['error_code_word_id'])
+        sample['copy_length'] = len(row['error_code_word_id'])
         sample['includes'] = row['includes']
         if self.set_type != 'valid' and self.set_type != 'test' and self.set_type != 'deepfix':
             begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[0])
             end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[0])
             sample['ac_tokens'] = [begin_id] + row['ac_code_word_id'] + [end_id]
             sample['ac_length'] = len(sample['ac_tokens'])
-            # sample['token_map'] = self.data_df.iloc[index]['token_map']
-            # sample['pointer_map'] = create_pointer_map(sample['ac_length'], sample['token_map'])
             sample['pointer_map'] = [0] + row['pointer_map'] + [sample['error_length']-1]
-            # sample['error_mask'] = self.data_df.iloc[index]['error_mask']
             sample['is_copy'] = [0] + row['is_copy'] + [0]
             sample['distance'] = row['distance']
-            # sample['grammar_mask_list'] = row['grammar_mask_list']
-            sample['grammar_mask_list'] = self.transformer.get_all_token_mask_train([row['ac_code_word_id']])[0]
-            sample['grammar_mask_length'] = [len(ma) for ma in sample['grammar_mask_list']]
-            # sample['grammar_mask_index_to_id_dict'] = [{i: m for i, m in enumerate(masks)} for masks in row['grammar_mask_list']]
-            # sample['grammar_mask_id_to_index_dict'] = [{m: i for i, m in enumerate(masks)} for masks in row['grammar_mask_list']]
+            if self.transformer is not None:
+                sample['grammar_mask_list'] = self.transformer.get_all_token_mask_train([row['ac_code_word_id']])[0]
+                sample['grammar_mask_length'] = [len(ma) for ma in sample['grammar_mask_list']]
+            else:
+                one_mask_list = sorted(set(row['ac_code_word_id'] + [end_id]))
+                sample['grammar_mask_list'] = [one_mask_list for _ in range(sample['ac_length']-1)]
+                mask_l = len(sample['grammar_mask_list'][0])
+                sample['grammar_mask_length'] = [mask_l for _ in sample['grammar_mask_list']]
         else:
             sample['ac_tokens'] = None
             sample['ac_length'] = 0
-            # sample['token_map'] = None
             sample['pointer_map'] = None
-            # sample['error_mask'] = None
             sample['is_copy'] = None
             sample['distance'] = 0
             sample['grammar_mask_list'] = None
             sample['grammar_mask_length'] = None
             # sample['grammar_mask_index_to_id_dict'] = None
             # sample['grammar_mask_id_to_index_dict'] = None
+
+        if self.use_ast:
+            code_graph = parse_ast_code_graph(sample['error_tokens_name'])
+            sample['error_length'] = code_graph.graph_length
+            in_seq, graph = code_graph.graph
+            # begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[0])
+            # end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[0])
+            sample['error_tokens'] = [self.vocabulary.word_to_id(t) for t in in_seq]
+            sample['adj'] = [[a, b] for a, b, _ in graph] + [[b, a] for a, b, _ in graph]
         return sample
 
     def add_samples(self, df):
@@ -177,12 +193,13 @@ class CCodeErrorDataSet(CustomerDataSet):
         return len(self._samples)
 
 
-def load_dataset(is_debug, vocabulary, mask_transformer):
+def load_dataset(is_debug, vocabulary, mask_transformer, data_type=None, use_ast=False):
     if is_debug:
-        data_dict = load_common_error_data_sample_100()
+        data_dict = load_common_error_data_sample_100(data_type=data_type)
     else:
-        data_dict = load_common_error_data()
-    datasets = [CCodeErrorDataSet(pd.DataFrame(dd), vocabulary, name, transformer_vocab_slk=mask_transformer) for
+        data_dict = load_common_error_data(data_type=data_type)
+    datasets = [CCodeErrorDataSet(pd.DataFrame(dd), vocabulary, name, transformer_vocab_slk=mask_transformer,
+                                  use_ast=use_ast) for
                 dd, name in
                 zip(data_dict, ["train", "all_valid", "all_test"])]
     for d, n in zip(datasets, ["train", "val", "test"]):
@@ -192,11 +209,11 @@ def load_dataset(is_debug, vocabulary, mask_transformer):
 
     train_dataset, valid_dataset, test_dataset = datasets
 
-    ac_copy_data_dict = create_copy_addition_data(train_dataset.data_df['ac_code_word_id'],
-                                                  train_dataset.data_df['includes'])
-    ac_copy_dataset = CCodeErrorDataSet(pd.DataFrame(ac_copy_data_dict), vocabulary, 'ac_copy',
-                                        transformer_vocab_slk=mask_transformer, no_filter=True)
-    return train_dataset, valid_dataset, test_dataset, ac_copy_dataset
+    # ac_copy_data_dict = create_copy_addition_data(train_dataset.data_df['ac_code_word_id'],
+    #                                               train_dataset.data_df['includes'])
+    # ac_copy_dataset = CCodeErrorDataSet(pd.DataFrame(ac_copy_data_dict), vocabulary, 'ac_copy',
+    #                                     transformer_vocab_slk=mask_transformer, no_filter=True)
+    return train_dataset, valid_dataset, test_dataset, None
 
 
 def load_sample_save_dataset(is_debug, vocabulary, mask_transformer):
@@ -297,9 +314,35 @@ class IndexPositionEmbedding(nn.Module):
         return embedded_input
 
 
+class ContextEncoder(nn.Module):
+    def __init__(self, rnn_type, hidden_size, n_layer, dropout_p):
+        super(ContextEncoder, self).__init__()
+        if rnn_type == 'gru':
+            self.rnn = nn.GRU(input_size=2 * hidden_size, hidden_size=hidden_size, num_layers=n_layer,
+                              batch_first=True, bidirectional=True, dropout=dropout_p)
+
+    def forward(self, seq, copy_length):
+        seq_list = torch.unbind(seq, dim=0)
+        copy_list = torch.unbind(copy_length, dim=0)
+        token_seq = [s[:e] for s, e in zip(seq_list, copy_list)]
+        hidden = self._encode(token_seq)
+        return hidden
+
+    def _encode(self, seq):
+        packed_seq, idx_unsort = torch_util.pack_sequence(seq)
+        # self.rnn.flatten_parameters()
+        _, encoded_state = self.rnn(packed_seq)
+        return torch.index_select(encoded_state, 1, idx_unsort.to(seq[0].device))
+
+
+
+
+
 class RNNPointerNetworkModelWithSLKMask(nn.Module):
-    def __init__(self, vocabulary_size, hidden_size, num_layers, start_label, end_label, dropout_p=0.1, MAX_LENGTH=500,
-                 atte_position_type='position', mask_transformer: TransformVocabularyAndSLK=None):
+    def __init__(self, vocabulary_size, hidden_size, num_layers, start_label, end_label, graph_embedding, pointer_type,
+                 graph_parameter, dropout_p=0.1, MAX_LENGTH=500,
+                 atte_position_type='position', mask_transformer: TransformVocabularyAndSLK=None,
+                 rnn_type='gru', rnn_layer_number=3, no_position_embedding=False, position_embedding_length=1000):
         super(RNNPointerNetworkModelWithSLKMask, self).__init__()
         self.vocabulary_size = vocabulary_size
         self.hidden_size = hidden_size
@@ -311,17 +354,32 @@ class RNNPointerNetworkModelWithSLKMask(nn.Module):
         self.atte_position_type = atte_position_type
 
         self.mask_transformer = mask_transformer
+        self.graph_embedding = graph_embedding
+        self.no_position_embedding = no_position_embedding
 
-
-        self.encode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
-        self.decode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, MAX_LENGTH+1)
+        if no_position_embedding:
+            self.encode_position_embedding = nn.Embedding(vocabulary_size, hidden_size)
+            self.decode_position_embedding = nn.Embedding(vocabulary_size, hidden_size)
+            self.transform_encoder_embedding_to_atte = nn.Linear(hidden_size, hidden_size//2)
+        else:
+            self.encode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, position_embedding_length)
+            self.decode_position_embedding = IndexPositionEmbedding(vocabulary_size, self.hidden_size//2, position_embedding_length)
 
         self.encoder = EncoderRNN(vocab_size=vocabulary_size, max_len=MAX_LENGTH, input_size=self.hidden_size, hidden_size=self.hidden_size//2,
-                                  n_layers=num_layers, bidirectional=True, rnn_cell='lstm',
+                                  n_layers=num_layers, bidirectional=True, rnn_cell=rnn_type,
                                   input_dropout_p=self.dropout_p, dropout_p=self.dropout_p, variable_lengths=False,
                                   embedding=None, update_embedding=True)
+
+        self.graph_encoder = GraphEncoder(hidden_size=hidden_size, graph_embedding=graph_embedding,
+                                          pointer_type=pointer_type, graph_parameter=graph_parameter,
+                                          embedding=self.encode_position_embedding, embedding_size=hidden_size,
+                                          p2_type='static', p2_step_length=1, do_embedding=False)
+
+        self.context_encoder = ContextEncoder(rnn_type=rnn_type, hidden_size=hidden_size // 2, n_layer=rnn_layer_number,
+                                          dropout_p=dropout_p)
+
         self.decoder = DecoderRNN(vocab_size=vocabulary_size, max_len=MAX_LENGTH, hidden_size=hidden_size,
-                                  sos_id=start_label, eos_id=end_label, n_layers=num_layers, rnn_cell='lstm',
+                                  sos_id=start_label, eos_id=end_label, n_layers=num_layers, rnn_cell=rnn_type,
                                   bidirectional=False, input_dropout_p=self.dropout_p, dropout_p=self.dropout_p,
                                   use_attention=True)
 
@@ -335,8 +393,6 @@ class RNNPointerNetworkModelWithSLKMask(nn.Module):
         # self.output_linear = PositionWiseFeedForwardNet(input_size=self.hidden_size, hidden_size=self.hidden_size,
         #                                                 output_size=vocabulary_size, hidden_layer_count=1)
 
-        # self.output_linear = DynamicFeedForward(input_size=self.hidden_size, hidden_size=self.hidden_size,
-        #                                         output_size=vocabulary_size)
         self.dynamic_output_linear = DynamicFeedForward(input_size=self.hidden_size, hidden_size=self.hidden_size,
                                                 output_size=vocabulary_size)
 
@@ -405,9 +461,10 @@ class RNNPointerNetworkModelWithSLKMask(nn.Module):
                 value_output.masked_fill_(~decode_mask.view(decode_mask.shape[0], decode_mask.shape[1], *[1 for i in range(len(value_output.shape)-2)]), 0)
         return is_copy, value_output, pointer_output, hidden
 
-    def forward(self, inputs, input_mask, output, output_mask, inputs_list, value_mask_set_tensor, mask_mask=None, pointer_encoder_mask=None, do_sample=False):
+    def forward(self, inputs, input_mask, output, output_mask, inputs_list, value_mask_set_tensor, mask_mask=None, pointer_encoder_mask=None,
+                adjacent_matrix=None, copy_length=None, do_sample=False):
         if do_sample:
-            return self.forward_dynamic_test(inputs, input_mask, inputs_list)
+            return self.forward_dynamic_test(inputs, input_mask, inputs_list, adjacent_matrix, copy_length)
 
         # output_length = to_cuda(torch.sum(output_mask, dim=-1))
         # output_token_length = output_length - 2
@@ -425,17 +482,36 @@ class RNNPointerNetworkModelWithSLKMask(nn.Module):
         # value_mask = to_cuda(torch.ByteTensor(PaddedList(value_mask, shape=[output.shape[0], output.shape[1]-1, self.vocabulary_size])))
         # value_mask = None
 
-        position_input = self.encode_position_embedding(inputs, input_mask)
-        if self.atte_position_type == 'position':
-            encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
-        elif self.atte_position_type == 'content':
-            encoder_atte_input_embedded = self.encode_position_embedding.forward_content(inputs, input_mask)
+        batch_size = inputs.shape[0]
+        # position_input = self.encode_position_embedding(inputs, input_mask)
+        if not self.no_position_embedding:
+            position_input = self.encode_position_embedding(inputs, input_mask)
+            if self.atte_position_type == 'position':
+                encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
+            elif self.atte_position_type == 'content':
+                encoder_atte_input_embedded = self.encode_position_embedding.forward_content(inputs, input_mask)
+            else:
+                encoder_atte_input_embedded = self.encode_position_embedding.forward_content(inputs, input_mask)
         else:
-            encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
-        encode_value, hidden = self.encoder(position_input)
-        encoder_hidden = [hid.view(self.num_layers, hid.shape[1], -1) for hid in hidden]
+            position_input = self.encode_position_embedding(inputs)
+            encoder_atte_input_embedded = self.transform_encoder_embedding_to_atte(position_input)
 
-        position_output = self.decode_position_embedding(inputs=output, input_mask=output_mask)
+        if self.graph_embedding is not None:
+            p1_o, p2_o, encode_value = self.graph_encoder(adjacent_matrix, position_input, copy_length)
+            encoder_hidden = self.context_encoder(encode_value, copy_length).permute(1, 0, 2)\
+            .contiguous()\
+            .view(batch_size, self.num_layers, -1)\
+            .permute(1, 0, 2)\
+            .contiguous()
+        else:
+            # position_input = self.encode_position_embedding(inputs, input_mask)
+            encode_value, hidden = self.encoder(position_input)
+            encoder_hidden = [hid.view(self.num_layers, hid.shape[1], -1) for hid in hidden]
+
+        if self.no_position_embedding:
+            position_output = self.decode_position_embedding(output)
+        else:
+            position_output = self.decode_position_embedding(inputs=output, input_mask=output_mask)
         is_copy, value_output, pointer_output, _ = self.decode_step(decode_input=position_output, encoder_hidden=encoder_hidden,
                                                                  decode_mask=output_mask, encode_value=encode_value,
                                                                  position_embedded=encoder_atte_input_embedded,
@@ -446,17 +522,25 @@ class RNNPointerNetworkModelWithSLKMask(nn.Module):
         return is_copy, value_output, pointer_output, value_mask_set_tensor, error_list
 
 
-    def forward_dynamic_test(self, inputs, input_mask, inputs_list):
+    def forward_dynamic_test(self, inputs, input_mask, inputs_list, adjacent_matrix, copy_length):
         self.tmp_outputs_list = []
         batch_size = list(inputs.shape)[0]
-        position_input = self.encode_position_embedding(inputs, input_mask)
-        if self.atte_position_type == 'position':
-            encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
-        elif self.atte_position_type == 'content':
-            encoder_atte_input_embedded = self.encode_position_embedding.forward_content(inputs, input_mask)
+        # position_input = self.encode_position_embedding(inputs, input_mask)
+        if not self.no_position_embedding:
+            if self.atte_position_type == 'position':
+                encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
+            elif self.atte_position_type == 'content':
+                encoder_atte_input_embedded = self.encode_position_embedding.forward_content(inputs, input_mask)
+            else:
+                encoder_atte_input_embedded = self.encode_position_embedding.forward_content(inputs, input_mask)
         else:
-            encoder_atte_input_embedded = self.encode_position_embedding.forward_position(inputs, input_mask)
-        encode_value, hidden = self.encoder(position_input)
+            encoder_atte_input_embedded = self.encode_position_embedding(inputs)
+            encoder_atte_input_embedded = self.transform_encoder_embedding_to_atte(encoder_atte_input_embedded)
+        if self.graph_embedding is not None:
+            p1_o, p2_o, encode_value = self.graph_encoder(adjacent_matrix, inputs, copy_length)
+        else:
+            position_input = self.encode_position_embedding(inputs, input_mask)
+            encode_value, hidden = self.encoder(position_input)
         hidden = [hid.view(self.num_layers, hid.shape[1], -1) for hid in hidden]
 
         self.sample_decoder_list = [self.mask_transformer.create_new_slk_iterator() for i in range(batch_size)]
@@ -506,7 +590,10 @@ class RNNPointerNetworkModelWithSLKMask(nn.Module):
 
         batch_size = outputs.shape[0]
         sequence_continue_mask = continue_mask.view(batch_size, 1)
-        output_embed = self.decode_position_embedding(inputs=outputs, input_mask=sequence_continue_mask,
+        if self.no_position_embedding:
+            output_embed = self.decode_position_embedding(outputs)
+        else:
+            output_embed = self.decode_position_embedding(inputs=outputs, input_mask=sequence_continue_mask,
                                                       start_index=start_index)
         continue_list = continue_mask.tolist()
         outputs_list = outputs.view(-1).tolist()
@@ -563,12 +650,13 @@ class RNNPointerNetworkModelWithSLKMask(nn.Module):
         return (is_copy, value_output, pointer_output, slk_mask_tensor), hidden, error_list
 
 
-def create_parse_rnn_input_batch_data_fn(vocab):
+def create_parse_rnn_input_batch_data_fn(vocab, use_ast=False):
 
     def parse_rnn_input_batch_data(batch_data, do_sample=False, add_value_mask=False):
         error_tokens = to_cuda(torch.LongTensor(PaddedList(batch_data['error_tokens'])))
         max_input = max(batch_data['error_length'])
         input_mask = to_cuda(create_sequence_length_mask(to_cuda(torch.LongTensor(batch_data['error_length'])), max_len=max_input))
+        copy_length = to_cuda(torch.LongTensor(batch_data['copy_length']))
 
         if not do_sample:
             # ac_tokens_decoder_input = [bat[:-1] for bat in batch_data['ac_tokens']]
@@ -617,8 +705,32 @@ def create_parse_rnn_input_batch_data_fn(vocab):
         else:
             pointer_encoder_mask_tensor = None
 
+        if use_ast:
+            adjacent_tuple = [[[i] + tt for tt in t] for i, t in enumerate(batch_data['adj'])]
+            adjacent_tuple = [list(t) for t in unzip(more_itertools.flatten(adjacent_tuple))]
+            size = max(batch_data['error_length'])
+            # print("max length in this batch:{}".format(size))
+            adjacent_tuple = torch.LongTensor(adjacent_tuple)
+            adjacent_values = torch.ones(adjacent_tuple.shape[1]).long()
+            adjacent_size = torch.Size([len(batch_data['error_length']), size, size])
+            info('batch_data input_length: ' + str(batch_data['error_length']))
+            info('size: ' + str(size))
+            info('adjacent_tuple: ' + str(adjacent_tuple.shape))
+            info('adjacent_size: ' + str(adjacent_size))
+            adjacent_matrix = to_cuda(
+                torch.sparse.LongTensor(
+                    adjacent_tuple,
+                    adjacent_values,
+                    adjacent_size,
+                ).float().to_dense()
+            )
+        else:
+            adjacent_matrix = None
+
         # return error_tokens, input_mask, ac_tokens, output_mask
-        return error_tokens, input_mask, ac_tokens, output_mask, batch_data['error_tokens'], value_mask_set_tensor, mask_mask, pointer_encoder_mask_tensor
+        return error_tokens, input_mask, ac_tokens, output_mask, batch_data['error_tokens'], \
+               value_mask_set_tensor, mask_mask, pointer_encoder_mask_tensor, \
+               adjacent_matrix, copy_length
     return parse_rnn_input_batch_data
 
 
@@ -652,7 +764,8 @@ def create_combine_loss_fn(copy_weight=1, pointer_weight=1, value_weight=1, aver
     pointer_loss_fn = nn.CrossEntropyLoss(ignore_index=IGNORE_TOKEN, reduce=False)
     value_loss_fn = nn.CrossEntropyLoss(ignore_index=IGNORE_TOKEN, reduce=False)
 
-    def combine_total_loss(is_copy, value_log_probs, pointer_log_probs, slk_mask_result, error_list, target_copy, target_pointer, target_value,
+    def combine_total_loss(is_copy, value_log_probs, pointer_log_probs, slk_mask_result, error_list,
+                           target_copy, target_pointer, target_value,
                            target_ac_token, output_mask):
         # record_is_nan(is_copy, 'is_copy: ')
         # record_is_nan(pointer_log_probs, 'pointer_log_probs: ')
@@ -750,3 +863,7 @@ def create_save_sample_data(vocab):
     return add_model_data_record
 
 
+def create_multi_step_next_outputs_fn():
+    def create_multi_step_next_outputs():
+        pass
+    return create_multi_step_next_outputs

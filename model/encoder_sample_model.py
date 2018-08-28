@@ -191,7 +191,8 @@ class GraphEncoder(nn.Module):
                  pointer_type='itr',
                  embedding=None, embedding_size=400,
                  p2_type='static',
-                 p2_step_length=0
+                 p2_step_length=0,
+                 do_embedding=True
                  ):
         """
         :param hidden_size: The hidden state size in the model
@@ -203,6 +204,7 @@ class GraphEncoder(nn.Module):
         self.embedding = embedding
         self.p2_type = p2_type
         self.p2_step_length = p2_step_length
+        self.do_embedding = do_embedding
         self.size_transform = nn.Linear(embedding_size, hidden_size)
         if self.pointer_type == 'itr':
             self.pointer_transform = nn.Linear(2 * hidden_size, 1)
@@ -225,8 +227,9 @@ class GraphEncoder(nn.Module):
                 copy_length,
                 p1_target=None,
                 ):
-        input_seq = self.embedding(input_seq)
-        input_seq = self.size_transform(input_seq)
+        if self.do_embedding:
+            input_seq = self.embedding(input_seq)
+            input_seq = self.size_transform(input_seq)
         input_seq = self.graph(input_seq, adjacent_matrix, copy_length)
         batch_size = input_seq.shape[0]
         if self.pointer_type == 'itr':

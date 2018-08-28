@@ -516,28 +516,51 @@ class SequenceCorrect(Evaluator):
 
 
 class SLKOutputAccuracyAndCorrect(Evaluator):
-    def __init__(self, ignore_token=None):
+    def __init__(self, ignore_token=None, do_extract_evaluate=False):
         self.accuracy_evaluator = TokenAccuracy(ignore_token=ignore_token)
+        self.point_accuracy = TokenAccuracy(ignore_token=ignore_token)
         self.correct_evaluator = SequenceCorrect(ignore_token=ignore_token)
+        self.is_copy_accuracy = TokenAccuracy(ignore_token=ignore_token)
+        self.do_extract_evaluate = do_extract_evaluate
 
     def clear_result(self):
         self.accuracy_evaluator.clear_result()
         self.correct_evaluator.clear_result()
+        self.point_accuracy.clear_result()
+        self.is_copy_accuracy.clear_result()
 
     def add_result(self, output, model_output, model_target, model_input, ignore_token=None, batch_data=None):
         target = model_target[3]
         accuracy = self.accuracy_evaluator.add_result(output, target, ignore_token=ignore_token, batch_data=batch_data)
         correct = self.correct_evaluator.add_result(output, target, ignore_token=ignore_token, batch_data=batch_data)
-        return 'accuracy: {}, correct: {}'.format(accuracy, correct)
+
+        if self.do_extract_evaluate:
+            point_output = torch.topk(F.softmax(model_output[2], dim=-1), k=1, dim=-1)[1].squeeze(dim=-1)
+            point_target = model_target[1]
+            point_acc = self.point_accuracy.add_result(point_output, point_target, ignore_token=ignore_token, batch_data=batch_data)
+
+            output_mask = model_target[4]
+            is_copy_output = (model_output[0] > 0.5).float() * output_mask.float()
+            is_copy_acc = self.is_copy_accuracy.add_result(is_copy_output, model_target[0],
+                                             ignore_token=ignore_token, batch_data=batch_data)
+        else:
+            point_acc = 0
+            is_copy_acc = 0
+
+        return 'accuracy: {}, correct: {}, point_accuracy: {}, is_copy_acc: {}'\
+            .format(accuracy, correct, point_acc, is_copy_acc)
 
     def get_result(self):
         accuracy = self.accuracy_evaluator.get_result()
         correct = self.correct_evaluator.get_result()
-        return accuracy, correct
+        point_accuracy = self.point_accuracy.get_result()
+        is_copy_acc = self.is_copy_accuracy.get_result()
+        return accuracy, correct, point_accuracy, is_copy_acc
 
     def __str__(self):
-        accuracy, correct = self.get_result()
-        return ' SLKOutputAccuracy top 1: ' + str(accuracy) + '  SLKOutputCorrect top 1: ' + str(correct)
+        accuracy, correct, point_accuracy, is_copy_acc = self.get_result()
+        return ' SLKOutputAccuracy top 1: ' + str(accuracy) + '  SLKOutputCorrect top 1: ' + str(correct) + \
+               ' point_accuracy: ' + str(point_accuracy) + ' is_copy_acc: ' + str(is_copy_acc)
 
     def __repr__(self):
         return self.__str__()
