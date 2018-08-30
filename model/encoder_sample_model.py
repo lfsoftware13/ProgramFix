@@ -617,7 +617,7 @@ class EncoderSampleModel(nn.Module):
                                        compatible_tokens_length, is_copy_target)
 
 
-def create_loss_fn(ignore_id):
+def create_loss_fn(ignore_id, only_sample=False):
     bce_loss = nn.BCEWithLogitsLoss(reduce=False)
     cross_loss = nn.CrossEntropyLoss(ignore_index=ignore_id)
 
@@ -632,7 +632,10 @@ def create_loss_fn(ignore_id):
         p2_loss = cross_loss(p2_o, p2_target)
         copy_loss = cross_loss(copy_output.permute(0, 2, 1), copy_target)
         sample_loss = cross_loss(sample_output.permute(0, 2, 1), sample_small_target)
-        return is_copy_loss + sample_loss + p1_loss + p2_loss + copy_loss
+        if not only_sample:
+            return is_copy_loss + sample_loss + p1_loss + p2_loss + copy_loss
+        else:
+            return sample_loss + p1_loss + p2_loss
     return loss_fn
 
 
@@ -701,10 +704,10 @@ def create_parse_input_batch_data_fn(use_ast=False, p2_type='static'):
     return parse_input_batch_data_fn
 
 
-def create_output_ids_fn(end_id, p2_type='static'):
+def create_output_ids_fn(end_id, p2_type='static', only_sample=False):
     def create_output_ids(model_output, model_input, do_sample=False):
         output_record_list = create_records_all_output(model_input=model_input, model_output=model_output,
-                                                       do_sample=do_sample, p2_type=p2_type)
+                                                       do_sample=do_sample, p2_type=p2_type, only_sample=only_sample)
         p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = output_record_list
 
         sample_output_ids_list = sample_output_ids.tolist()
@@ -754,11 +757,13 @@ def expand_output_and_target_fn(ignore_token):
     return expand_output_and_target
 
 
-def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabulary=None, use_ast=False, p2_type='static'):
+def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabulary=None, use_ast=False, p2_type='static',
+                                          only_sample=False):
     def create_multi_step_next_input_batch(input_data, model_input, model_output, continue_list, direct_output=False):
         # output_record_list = create_records_all_output(model_input=model_input, model_output=model_output, do_sample=True)
         output_record_list = create_records_all_output_for_beam(model_input=model_input, model_output=model_output,
-                                                                do_sample=True, direct_output=direct_output, p2_type=p2_type)
+                                                                do_sample=True, direct_output=direct_output, p2_type=p2_type,
+                                                                only_sample=only_sample)
         p1, p2, is_copy, copy_ids, sample_output, sample_output_ids = output_record_list
 
         cur_error_position_data = torch.ge(p1, p2).tolist()
@@ -836,7 +841,7 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
     return create_multi_step_next_input_batch
 
 
-def create_records_all_output(model_input, model_output, do_sample=False, p2_type='static'):
+def create_records_all_output(model_input, model_output, do_sample=False, p2_type='static', only_sample=False):
     p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens = model_output
     if do_sample:
         compatible_tokens = output_compatible_tokens
@@ -848,6 +853,8 @@ def create_records_all_output(model_input, model_output, do_sample=False, p2_typ
         p2 = p1 + p2 + 1
     # is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
     is_copy = torch.sigmoid(is_copy) > 0.5
+    if only_sample:
+        is_copy = torch.zeros_like(is_copy).to(is_copy.device)
     # is_copy = torch.squeeze(is_copy, dim=-1) > 0.5
     copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
     sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
@@ -859,7 +866,8 @@ def create_records_all_output(model_input, model_output, do_sample=False, p2_typ
     return p1, p2, is_copy, copy_ids, sample_output, sample_output_ids
 
 
-def create_records_all_output_for_beam(model_input, model_output, do_sample=False, direct_output=False, p2_type='static'):
+def create_records_all_output_for_beam(model_input, model_output, do_sample=False, direct_output=False, p2_type='static',
+                                       only_sample=False):
     p1_o, p2_o, is_copy, copy_output, sample_output, output_compatible_tokens = model_output
     if do_sample:
         compatible_tokens = output_compatible_tokens
@@ -872,6 +880,8 @@ def create_records_all_output_for_beam(model_input, model_output, do_sample=Fals
     if not direct_output:
         # is_copy = torch.squeeze(torch.sigmoid(is_copy), dim=-1) > 0.5
         is_copy = torch.sigmoid(is_copy) > 0.5
+        if only_sample:
+            is_copy = torch.zeros_like(is_copy).to(is_copy.device)
         copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
         sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
         sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)

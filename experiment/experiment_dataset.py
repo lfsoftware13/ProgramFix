@@ -27,7 +27,8 @@ class IterateErrorDataSet(CustomerDataSet):
                  do_flatten=False,
                  MAX_LENGTH=500,
                  use_ast=False,
-                 do_multi_step_sample=False):
+                 do_multi_step_sample=False,
+                 only_smaple=False):
         # super().__init__(data_df, vocabulary, set_type, transform, no_filter)
         self.set_type = set_type
         self.vocabulary = vocabulary
@@ -36,6 +37,7 @@ class IterateErrorDataSet(CustomerDataSet):
         self.max_length = MAX_LENGTH
         self.use_ast = use_ast
         self.transform = False
+        self.only_sample = only_smaple
         # if self.set_type != 'valid' and self.set_type != 'test' and self.set_type != 'deepfix':
         #     self.do_sample = False
         # else:
@@ -193,6 +195,9 @@ class IterateErrorDataSet(CustomerDataSet):
 
                 sample['sample_target'] = row['sample_ac_id_list'] + [inner_end_id]
                 sample['sample_target'] = [t if c == 0 else -1 for c, t in zip(sample['is_copy_target'], sample['sample_target'])]
+                if self.only_sample:
+                    sample['sample_target'] = [st if c == 0 else sample['input_seq'][t] for c, t, st in zip(sample['is_copy_target'], sample['copy_target'], sample['sample_target'])]
+                    sample['is_copy_target'] = [0] * len(sample['is_copy_target'])
                 sample['sample_small_target'] = [sample_mask_dict[t] if c == 0 else -1 for c, t in zip(sample['is_copy_target'], sample['sample_target'])]
                 sample['sample_outputs_length'] = len(sample['sample_target'])
 
@@ -583,7 +588,7 @@ class SamplePackedDataset(CustomerDataSet):
 
 
 def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
-                                          do_multi_step_sample=False, merge_action=True):
+                                          do_multi_step_sample=False, merge_action=True, only_sample=False):
     if is_debug:
         data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten, merge_action=merge_action)
     else:
@@ -592,7 +597,8 @@ def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer
     #     vocabulary = load_graph_vocabulary(vocabulary)
 
     datasets = [IterateErrorDataSet(pd.DataFrame(dd), vocabulary, name, transformer_vocab_slk=mask_transformer,
-                                    do_flatten=do_flatten, use_ast=use_ast, do_multi_step_sample=do_multi_step_sample)
+                                    do_flatten=do_flatten, use_ast=use_ast, do_multi_step_sample=do_multi_step_sample,
+                                    only_smaple=only_sample)
                 for dd, name in zip(data_dict, ["train", "all_valid", "all_test"])]
     for d, n in zip(datasets, ["train", "val", "test"]):
         info_output = "There are {} parsed data in the {} dataset".format(len(d), n)
