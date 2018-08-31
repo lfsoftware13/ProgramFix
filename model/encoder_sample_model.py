@@ -13,6 +13,7 @@ from torch.utils.data import Dataset
 import more_itertools
 
 from c_parser.ast_parser import parse_ast_code_graph
+from common.feed_forward_block import MultiLayerFeedForwardLayer
 from common.graph_embedding import GGNNLayer, MultiIterationGraph
 from common import torch_util, util
 from common.logger import info
@@ -23,6 +24,7 @@ from common.torch_util import create_sequence_length_mask, Update, MaskOutput, e
 from common.util import PaddedList, create_effect_keyword_ids_set
 from model.base_attention import record_is_nan
 from seq2seq.models import EncoderRNN, DecoderRNN
+from seq2seq.models.attention import Attention
 
 """
 The batch_data dict should has the following keys:
@@ -300,6 +302,27 @@ class Output(nn.Module):
         return is_copy, copy_output, sample_output
 
 
+class FeedForwardOutput(nn.Module):
+    def __init__(self, input_size, hidden_size, n_layer, p_dropout=0.2):
+        super().__init__()
+        self.attn = Attention(hidden_size)
+        self.transform = MultiLayerFeedForwardLayer(
+            n_layer,
+            input_size,
+            hidden_size,
+            hidden_size,
+            p_dropout,
+        )
+
+    def forward(self, o, context, mask):
+        self.attn.set_mask(mask.unsqueeze(1))
+        o = o.permute(1, 0, 2)
+        o = o.contiguous().view(o.shape[0], -1)
+        o = self.transform(o)
+        o, _ = self.attn(o.unsqueeze(1), context)
+        return o
+
+
 class EncoderSampleModel(nn.Module):
     def __init__(self,
                  start_label,
@@ -323,6 +346,7 @@ class EncoderSampleModel(nn.Module):
                  beam_size=5,
                  p2_type='static',
                  p2_step_length=0,
+                 feedforward_output=False,
                  ):
         """
         :param vocabulary_size: The size of token vocabulary
@@ -354,10 +378,14 @@ class EncoderSampleModel(nn.Module):
                                           dropout_p=dropout_p)
         # self.slice_encoder = SliceEncoder(rnn_type=rnn_type, hidden_size=hidden_size, n_layer=rnn_layer_number,
         #                                   dropout_p=dropout_p)
-        self.decoder = DecoderRNN(vocab_size=vocabulary_size, max_len=max_sample_length, hidden_size=hidden_size,
-                                  sos_id=inner_start_label, eos_id=inner_end_label, n_layers=rnn_layer_number, rnn_cell=rnn_type,
-                                  bidirectional=False, input_dropout_p=dropout_p, dropout_p=dropout_p,
-                                  use_attention=True)
+        self.feedforward_output = feedforward_output
+        if feedforward_output:
+            self.decoder = FeedForwardOutput(rnn_layer_number*hidden_size, hidden_size, rnn_layer_number, dropout_p)
+        else:
+            self.decoder = DecoderRNN(vocab_size=vocabulary_size, max_len=max_sample_length, hidden_size=hidden_size,
+                                      sos_id=inner_start_label, eos_id=inner_end_label, n_layers=rnn_layer_number, rnn_cell=rnn_type,
+                                      bidirectional=False, input_dropout_p=dropout_p, dropout_p=dropout_p,
+                                      use_attention=True)
         self.output = Output(hidden_size, vocabulary_size)
         self.layer_number = rnn_layer_number
         self.hidden_size = hidden_size
@@ -402,10 +430,13 @@ class EncoderSampleModel(nn.Module):
             .contiguous()
         encoder_mask = create_sequence_length_mask(input_length, max_len=input_seq.shape[1])
         # do decoder and calculate output
-        decoder_output, _, _ = self.decoder(inputs=self.embedding(target), encoder_hidden=slice_state,
-                                            encoder_outputs=input_seq, encoder_mask=~encoder_mask,
-                                            teacher_forcing_ratio=1)
-        decoder_output = torch.stack(decoder_output, dim=1)
+        if self.feedforward_output:
+            decoder_output = self.decoder(o=slice_state, context=input_seq, mask=~encoder_mask)
+        else:
+            decoder_output, _, _ = self.decoder(inputs=self.embedding(target), encoder_hidden=slice_state,
+                                                encoder_outputs=input_seq, encoder_mask=~encoder_mask,
+                                                teacher_forcing_ratio=1)
+            decoder_output = torch.stack(decoder_output, dim=1)
         copy_mask = create_sequence_length_mask(copy_length, max_len=input_seq.shape[1])
         is_copy, copy_output, sample_output = self.output(decoder_output, input_seq, copy_mask, compatible_tokens,
                                                           compatible_tokens_length, is_sample=False,
@@ -640,7 +671,7 @@ def create_loss_fn(ignore_id, only_sample=False):
     return loss_fn
 
 
-def create_parse_target_batch_data(ignore_token, p2_type='static'):
+def create_parse_target_batch_data(ignore_token, p2_type='static', feedforward_output=False):
     def parse_target_batch_data(batch_data):
         p1 = to_cuda(torch.LongTensor(batch_data['p1_target']))
         p2 = to_cuda(torch.LongTensor(batch_data['p2_target']))
@@ -650,12 +681,17 @@ def create_parse_target_batch_data(ignore_token, p2_type='static'):
         copy_target = to_cuda(torch.LongTensor(PaddedList(batch_data['copy_target'], fill_value=ignore_token)))
         sample_target = to_cuda(torch.LongTensor(PaddedList(batch_data['sample_target'], fill_value=ignore_token)))
         sample_small_target = to_cuda(torch.LongTensor(PaddedList(batch_data['sample_small_target'])))
+        if feedforward_output:
+            def first_token(t):
+                return t[:, 0].unsqueeze(-1)
+            is_copy, copy_target, sample_target, sample_small_target = \
+                [first_token(t) for t in [is_copy, copy_target, sample_target, sample_small_target]]
         return p1, p2, is_copy, copy_target, sample_target, sample_small_target
 
     return parse_target_batch_data
 
 
-def create_parse_input_batch_data_fn(use_ast=False, p2_type='static'):
+def create_parse_input_batch_data_fn(use_ast=False, p2_type='static', feedforward_output=False):
     def parse_input_batch_data_fn(batch_data, do_sample):
         def to_long(x):
             return to_cuda(torch.LongTensor(x))
@@ -696,6 +732,11 @@ def create_parse_input_batch_data_fn(use_ast=False, p2_type='static'):
             max_mask_len = max(max(batch_data['compatible_tokens_length']))
             compatible_tokens = to_long(PaddedList(batch_data['compatible_tokens'], shape=[batch_size, seq_len, max_mask_len]))
             compatible_tokens_length = to_long(PaddedList(batch_data['compatible_tokens_length']))
+            if feedforward_output:
+                is_copy_target = is_copy_target[:, 0].unsqueeze(-1)
+                target = target[:, 0].unsqueeze(-1)
+                compatible_tokens = compatible_tokens[:, 0, :].unsqueeze(1)
+                compatible_tokens_length = compatible_tokens_length[:, 0].unsqueeze(-1)
             return adjacent_matrix, input_seq, input_length, copy_length, p1_target, p2_target, target, \
                    is_copy_target, \
                    compatible_tokens, \
