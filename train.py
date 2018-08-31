@@ -190,7 +190,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                         create_multi_step_next_input_batch_fn=None, extract_includes_fn=lambda x: x['includes'],
                         print_output_fn=None, do_beam_search=False, target_file_path='main.out', do_save_data=False,
                         max_save_distance=None, save_records_to_database=False,
-                        db_path='', table_name=''):
+                        db_path='', table_name='', change_output_records_to_batch_fn=None, create_save_database_records_fn=None):
     total_loss = to_cuda(torch.Tensor([0]))
     total_batch = to_cuda(torch.Tensor([0]))
     steps = 0
@@ -259,10 +259,8 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                         save_data_dict[k] = save_data_dict.get(k, []) + v
 
                 if save_records_to_database:
-                    from model.encoder_sample_model import change_output_records_to_batch
-                    from model.encoder_sample_model import create_save_database_records
-                    batch_output_records = change_output_records_to_batch(output_records_list, sample_steps)
-                    records_list = create_save_database_records(batch_data, sample_steps, final_output_name_list, result_list,
+                    batch_output_records = change_output_records_to_batch_fn(output_records_list, sample_steps)
+                    records_list = create_save_database_records_fn(batch_data, sample_steps, final_output_name_list, result_list,
                                                  batch_output_records)
                     save_records_list += records_list
 
@@ -422,7 +420,8 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        do_beam_search=False, target_file_path='main.out',
                        load_addition_generate_iterate_solver_train_dataset_fn=None,
                        max_save_distance=None, addition_step=1, no_addition_step=5,
-                       do_save_records_to_database=False):
+                       do_save_records_to_database=False, change_output_records_to_batch_fn=None,
+                       create_save_database_records_fn=None):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -525,7 +524,9 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                                              target_file_path=target_file_path,
                                                                                 do_save_data=False,
                                                                                 save_records_to_database=do_save_records_to_database,
-                                                                                db_path=db_path, table_name=table_basename)
+                                                                                db_path=db_path, table_name=table_basename,
+                                                                                change_output_records_to_batch_fn=change_output_records_to_batch_fn,
+                                                                                create_save_database_records_fn=create_save_database_records_fn)
             print('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             info('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             for evaluator in multi_step_test_evalutor:
@@ -738,6 +739,9 @@ if __name__ == '__main__':
     random_embedding = p_config.get('random_embedding', False)
     use_ast = p_config.get('use_ast', False)
 
+    change_output_records_to_batch_fn = p_config.get('change_output_records_to_batch_fn', None)
+    create_save_database_records_fn = p_config.get('create_save_database_records_fn', None)
+
     model_path = os.path.join(save_root_path, p_config['load_model_name'])
     model = get_model(
         p_config['model_fn'],
@@ -777,7 +781,10 @@ if __name__ == '__main__':
                        do_beam_search=do_beam_search, target_file_path=target_file_path,
                        load_addition_generate_iterate_solver_train_dataset_fn=load_addition_generate_iterate_solver_train_dataset_fn,
                        max_save_distance=max_save_distance, addition_step=addition_step,
-                       no_addition_step=no_addition_step, do_save_records_to_database=do_save_records_to_database)
+                       no_addition_step=no_addition_step, do_save_records_to_database=do_save_records_to_database,
+                       change_output_records_to_batch_fn=change_output_records_to_batch_fn,
+                       create_save_database_records_fn=create_save_database_records_fn
+                       )
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,
     #                                       train_loss_fn, "test_evaluate", label_preprocess_fn)

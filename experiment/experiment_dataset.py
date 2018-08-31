@@ -142,6 +142,7 @@ class IterateErrorDataSet(CustomerDataSet):
         #                                                       use_position_label=True)[0]
         # sample = dict(row)
         sample = {}
+        sample['id'] = row['id']
         sample['includes'] = row['includes']
         if not self.is_flatten and self.do_multi_step_sample:
             sample['input_seq'] = row['error_token_id_list'][0]

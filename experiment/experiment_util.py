@@ -422,7 +422,7 @@ def load_deepfix_error_data_for_iterate():
     df = df.loc[df_data[0].index.values]
 
     deepfix_dict = {'error_token_id_list': df_data[0], 'includes': df['includes'], 'distance': df['errorcount'],
-                    'error_token_name_list': df_data[1]}
+                    'error_token_name_list': df_data[1], 'id': df['code_id']}
     return deepfix_dict
 
 
@@ -507,6 +507,7 @@ def flatten_iterative_data(data_dict):
     flatten_dict = {}
     records = []
     for i in range(len(data_dict['error_token_id_list'])):
+        prog_id = data_dict['id']
         error_token_id_list = data_dict['error_token_id_list'].iloc[i]
         sample_error_id_list = data_dict['sample_error_id_list'].iloc[i]
         sample_ac_id_list = data_dict['sample_ac_id_list'].iloc[i]
@@ -528,14 +529,14 @@ def flatten_iterative_data(data_dict):
             else:
                 target_ac_token_id = ac_code_ids
             one = (error_token_id, sample_error_id, sample_ac_id, ac_pos, error_pos, includes, distance, ac_code_ids,
-                   is_copy, copy_pos, sample_mask_list, target_ac_token_id, error_token_name)
+                   is_copy, copy_pos, sample_mask_list, target_ac_token_id, error_token_name, prog_id)
             records += [one]
             c += 1
 
     for key, v in zip(['error_token_id_list', 'sample_error_id_list', 'sample_ac_id_list', 'ac_pos_list',
                        'error_pos_list', 'includes', 'distance', 'ac_code_ids', 'is_copy_list',
                        'copy_pos_list', 'sample_mask_list', 'target_ac_token_id_list',
-                       'error_token_name_list'], zip(*records)):
+                       'error_token_name_list', 'id'], zip(*records)):
         flatten_dict[key] = pd.Series(v)
     return flatten_dict
 

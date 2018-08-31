@@ -66,7 +66,8 @@ class SliceEncoder(nn.Module):
         else:
             seq_before = [s[:a+1] for a, s in zip(p1, seq)]
             before_encoder = self._encode(seq_before)
-            seq_after = [s[a:e] for a, s, e in zip(p2, seq, copy_length)]
+            # add a < e condition to avoid seq_after.shape[1] == 0 and it will cause _encoder(seq_after) error.
+            seq_after = [s[a:e] if a < e else s[e-1:e] for a, s, e in zip(p2, seq, copy_length)]
             # seq_after = [s[a:] for a, s in zip(p2, seq)]
             after_encoder = self._encode(seq_after)
             encoder = torch.cat((before_encoder, after_encoder), dim=-1)
@@ -256,7 +257,7 @@ class GraphEncoder(nn.Module):
                 if p1_target is None:
                     p1_target = torch.argmax(p1, dim=1)
                 p2_seq = [seq[p1_t+1:p1_t+1+self.p2_step_length] for seq, p1_t in zip(p2_seq, p1_target)]
-                # p2_seq = [torch.cat((seq, torch.zeros(self.p2_step_length-len(seq)).to(input_seq.device))).unsqueeze(0) for seq in p2_seq]
+                p2_seq = [torch.cat((seq, torch.zeros(self.p2_step_length-len(seq), input_seq.shape[-1]).to(input_seq.device))) for seq in p2_seq]
                 p2_seq = [seq.unsqueeze(0) for seq in p2_seq]
                 p2_seq = torch.cat(p2_seq, dim=0)
                 p2 = self.p2_pointer_network(p2_seq, query=torch.unsqueeze(p2_query, dim=1))
@@ -942,7 +943,7 @@ def multi_step_print_output_records_fn(inner_end_id):
 
 def change_output_records_to_batch(output_records_list, sample_steps):
     output_records_list = [[o.tolist() for o in s] for s in output_records_list]
-    batch_size = len(output_records_list[0])
+    batch_size = len(sample_steps)
     batch_output_records = [[[o[i] for o in s] for s in output_records_list] for i in range(batch_size)]
     batch_steps_output_records = [b[:s] for b, s in zip(batch_output_records, sample_steps)]
     return batch_steps_output_records
@@ -958,10 +959,12 @@ def create_save_database_records(batch_data, sample_steps, final_output_name_lis
         includes = json.dumps(batch_data['includes'][i])
         code = ' '.join(batch_data['input_seq_name'][i])
         sample_code = ' '.join(final_output_name_list[i])
+        code_list = json.dumps(batch_data['input_seq_name'][i])
+        sample_code_list = json.dumps(final_output_name_list[i])
         compile_res = 1 if result_list[i] else 0
         sample_step = sample_steps[i]
         sample_records = json.dumps(batch_output_records[i])
-        one = (id, includes, code, sample_code, compile_res, sample_step, sample_records)
+        one = (id, includes, code, sample_code, code_list, sample_code_list, compile_res, sample_step, sample_records)
         records_list += [one]
     return records_list
 

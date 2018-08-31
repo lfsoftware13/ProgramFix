@@ -725,13 +725,19 @@ def compile_syntax_c_code_by_gcc(code, file_path):
     return False
 
 
-def compile_c_code_by_gcc(code, file_path, target_file_path='main.out', add_pid=True):
+def compile_c_code_by_gcc(code, file_path, target_file_path='main.out', add_pid=True, log_file_path=None):
     if add_pid:
         file_path = add_pid_to_file_path(file_path)
         target_file_path = add_pid_to_file_path(target_file_path)
     write_code_to_file(code, file_path)
     # print(code)
-    res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
+    if log_file_path is None:
+        res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
+        # res = os.system('gcc -o {} -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
+    else:
+        log_file_path = add_pid_to_file_path(log_file_path)
+        # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >{} 2>&1'.format(target_file_path, file_path, log_file_path))
+        res = os.system('gcc -o {} -std=gnu99 {} >{} 2>&1'.format(target_file_path, file_path, log_file_path))
     # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {}'.format(target_file_path, file_path))
     # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} > nul 2> nul'.format(target_file_path, file_path))
     if res == 0:
