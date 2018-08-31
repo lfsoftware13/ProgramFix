@@ -72,13 +72,13 @@ def main_compile_code_and_read_error_info(db_path, table_name, do_compile_origin
         save_records = create_compile_info_save_records(ids, compile_info_list, error_list)
         save_compile_result(save_records, db_path, table_name, command_key='update_original_compile_info')
 
-    # effect_df = df[df['sample_step'].map(lambda x: x >= 0)]
-    # effect_df['full_sample_code'] = effect_df.apply(consist_full_code, raw=True, axis=1, code_key='sample_code')
-    # effect_ids = effect_df['id'].tolist()
-    # full_sample_code = effect_df['full_sample_code'].tolist()
-    # compile_res_list, compile_info_list, error_list = pool_compile_and_save(full_sample_code)
-    # save_records = create_compile_info_save_records(effect_ids, compile_info_list, error_list)
-    # save_compile_result(save_records, db_path, table_name, command_key='update_sample_compile_info')
+    effect_df = df[df['sample_step'].map(lambda x: x >= 0)]
+    effect_df['full_sample_code'] = effect_df.apply(consist_full_code, raw=True, axis=1, code_key='sample_code')
+    effect_ids = effect_df['id'].tolist()
+    full_sample_code = effect_df['full_sample_code'].tolist()
+    compile_res_list, compile_info_list, error_list = pool_compile_and_save(full_sample_code)
+    save_records = create_compile_info_save_records(effect_ids, compile_info_list, error_list)
+    save_compile_result(save_records, db_path, table_name, command_key='update_sample_compile_info')
 
 
 def check_error_count_main(db_path, table_name):
