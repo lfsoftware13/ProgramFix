@@ -33,5 +33,5 @@ def main_insert_unsample_records_to_database(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config4'
+    table_name = 'encoder_sample_config4_20'
     main_insert_unsample_records_to_database(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

@@ -318,21 +318,21 @@ def encoder_sample_config1(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer, do_flatten=do_flatten, use_ast=False,
-                                                     do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer, do_flatten=do_flatten, use_ast=False,
+    #                                                  do_multi_step_sample=do_multi_step_sample)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
     # datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
     #                                                                       mask_transformer=transformer,
     #                                                                       do_flatten=do_flatten, use_ast=False,
     #                                                                       do_multi_step_sample=do_multi_step_sample)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                  mask_transformer=transformer, do_flatten=do_flatten, use_ast=False,
-    #                                                do_multi_step_sample=do_multi_step_sample)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                     mask_transformer=transformer, do_flatten=do_flatten, use_ast=False,
+                                                   do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -361,12 +361,19 @@ def encoder_sample_config1(is_debug):
     from model.encoder_sample_model import create_multi_step_next_input_batch_fn
     from model.encoder_sample_model import multi_step_print_output_records_fn
     return {
-        'name': 'encoder_sample_dropout_with_token_action',
+        'name': 'encoder_sample_dropout',
         # 'name': 'reinforcement_encoder_sample_dropout_multi_error',
-        'save_name': 'encoder_sample_dropout_with_token_action.pkl',
+        # 'save_name': 'encoder_sample_dropout_no_overfitting.pkl',
+        'save_name': 'encoder_sample_dropout_overfitting.pkl',
         # 'load_model_name': 'encoder_sample_dropout_no_overfitting.pkl',
-        'load_model_name': 'encoder_sample_dropout_with_token_action.pkl',
+        'load_model_name': 'encoder_sample_dropout_overfitting.pkl',
         # 'logger_file_path': 'encoder_sample_dropout.log',
+
+        'do_save_records_to_database': True,
+        'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
+        'table_basename': 'encoder_sample_dropout_overfitting',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
 
         'model_fn': EncoderSampleModel,
         'model_dict': {"start_label": begin_id,
@@ -408,7 +415,7 @@ def encoder_sample_config1(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'vocabulary': vocabulary,
@@ -424,7 +431,7 @@ def encoder_sample_config1(is_debug):
 
         'epcohes': epoches,
         'start_epoch': 0,
-        'epoch_ratio': 0.35,
+        'epoch_ratio': 1,
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,
         'clip_norm': 1,
@@ -451,7 +458,7 @@ def encoder_sample_config2(is_debug):
     tokenize_fn = tokenize_by_clex_fn()
     transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
 
-    batch_size = 6
+    batch_size = 16
     epoches = 80
     ignore_id = -1
     max_length = 500
@@ -466,14 +473,14 @@ def encoder_sample_config2(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                                          mask_transformer=transformer,
-                                                                          do_flatten=do_flatten, use_ast=use_ast,
-                                                                          do_multi_step_sample=do_multi_step_sample)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                                       mask_transformer=transformer,
+    #                                                                       do_flatten=do_flatten, use_ast=use_ast,
+    #                                                                       do_multi_step_sample=do_multi_step_sample)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -503,20 +510,20 @@ def encoder_sample_config2(is_debug):
     from model.encoder_sample_model import multi_step_print_output_records_fn
     from experiment.experiment_dataset import load_addition_generate_iterate_solver_train_dataset_fn
     return {
-        # 'name': 'graph_encoder_sample_config2',
-        'name': 'graph_encoder_sample_config2_addition_data_retrain',
+        'name': 'graph_encoder_sample_config2',
+        # 'name': 'graph_encoder_sample_config2_addition_data_retrain',
         # 'name': 'reinforcement_graph_encoder_sample_config2_fast_iterate',
-        # 'save_name': 'graph_encoder_sample_config2.pkl',
-        'save_name': 'graph_encoder_sample_config2_addition_data_retrain.pkl',
+        'save_name': 'graph_encoder_sample_config2.pkl',
+        # 'save_name': 'graph_encoder_sample_config2_addition_data_retrain.pkl',
         # 'save_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
-        # 'load_model_name': 'graph_encoder_sample_config2.pkl',
-        'load_model_name': 'graph_encoder_sample_config2_addition_data_retrain.pkl',
+        'load_model_name': 'graph_encoder_sample_config2.pkl',
+        # 'load_model_name': 'graph_encoder_sample_config2_addition_data_retrain.pkl',
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'graph_encoder_sample_config2_addition_data_retrain',
+        'table_basename': 'graph_encoder_sample_config2_24',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -623,7 +630,7 @@ def encoder_sample_config3(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
 
@@ -633,14 +640,14 @@ def encoder_sample_config3(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                                          mask_transformer=transformer,
-                                                                          do_flatten=do_flatten, use_ast=use_ast,
-                                                                          do_multi_step_sample=do_multi_step_sample)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                                       mask_transformer=transformer,
+    #                                                                       do_flatten=do_flatten, use_ast=use_ast,
+    #                                                                       do_multi_step_sample=do_multi_step_sample)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     train_len = len(datasets[0]) * epoch_ratio if datasets[0] is not None else 100
 
@@ -664,9 +671,11 @@ def encoder_sample_config3(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'graph_encoder_sample_config3_only_ggnn_with_sequence_link',
+        'table_basename': 'graph_encoder_sample_config3_only_ggnn_with_sequence_link_79',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
 
         'model_fn': EncoderSampleModel,
         'model_dict':
@@ -706,7 +715,7 @@ def encoder_sample_config3(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
@@ -757,7 +766,7 @@ def encoder_sample_config4(is_debug):
     tokenize_fn = tokenize_by_clex_fn()
     transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
 
-    batch_size = 10
+    batch_size = 16
     epoches = 80
     ignore_id = -1
     max_length = 500
@@ -823,7 +832,7 @@ def encoder_sample_config4(is_debug):
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config4',
+        'table_basename': 'encoder_sample_config4_20',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -898,7 +907,7 @@ def encoder_sample_config4(is_debug):
         'ac_copy_radio': 0.2,
 
         'epcohes': epoches,
-        'start_epoch': 8,
+        'start_epoch': 0,
         'epoch_ratio': epoch_ratio,
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,
@@ -931,7 +940,7 @@ def encoder_sample_config6(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
 
@@ -941,15 +950,15 @@ def encoder_sample_config6(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -990,9 +999,11 @@ def encoder_sample_config6(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'graph_encoder_sample_config2_addition_data_retrain',
+        'table_basename': 'encoder_sample_config6_only_gru_with_token_action_19',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
 
         'model_fn': EncoderSampleModel,
         'model_dict':
@@ -1037,7 +1048,7 @@ def encoder_sample_config6(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
@@ -1095,7 +1106,7 @@ def encoder_sample_config7(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
 
@@ -1105,15 +1116,15 @@ def encoder_sample_config7(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -1154,9 +1165,11 @@ def encoder_sample_config7(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'graph_encoder_sample_config2_addition_data_retrain',
+        'table_basename': 'encoder_sample_config7_only_ggnn_with_token_action_with_sequence_link_25',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
 
         'model_fn': EncoderSampleModel,
         'model_dict':
@@ -1199,7 +1212,7 @@ def encoder_sample_config7(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
@@ -1265,15 +1278,15 @@ def encoder_sample_config5(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False, only_sample=True)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False, only_sample=True)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -1316,7 +1329,7 @@ def encoder_sample_config5(is_debug):
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config5',
+        'table_basename': 'encoder_sample_config5_11',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -1329,7 +1342,7 @@ def encoder_sample_config5(is_debug):
              "vocabulary_size": vocabulary.vocabulary_size,
              "embedding_size": 400,
              "hidden_size": 400,
-             "max_sample_length": 1,
+             "max_sample_length": 10,
              'graph_parameter': {"rnn_parameter": {'vocab_size': vocabulary.vocabulary_size,
                                                    'max_len': max_length, 'input_size': 400,
                                                    'input_dropout_p': 0.2, 'dropout_p': 0.2,
@@ -1424,7 +1437,7 @@ def encoder_sample_config8(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
     only_sample = True
@@ -1435,15 +1448,15 @@ def encoder_sample_config8(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False, only_sample=only_sample)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False, only_sample=only_sample)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -1484,9 +1497,9 @@ def encoder_sample_config8(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config8',
+        'table_basename': 'encoder_sample_config8_15',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -1538,7 +1551,7 @@ def encoder_sample_config8(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
@@ -1654,9 +1667,11 @@ def encoder_sample_config9(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config9_only_gru_with_token_action_only_sample',
+        'table_basename': 'graph_encoder_sample_config3_only_ggnn_with_sequence_link',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
 
         'model_fn': EncoderSampleModel,
         'model_dict':
@@ -1821,7 +1836,9 @@ def encoder_sample_config10(is_debug):
 
         'do_save_records_to_database': False,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config10_only_ggnn_with_token_action_with_sequence_link_only_sample',
+        'table_basename': 'graph_encoder_sample_config3_only_ggnn_with_sequence_link',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
 
         'model_fn': EncoderSampleModel,
         'model_dict':

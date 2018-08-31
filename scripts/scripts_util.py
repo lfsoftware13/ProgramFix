@@ -31,3 +31,9 @@ def read_original_error_info() -> pd.DataFrame:
 def save_compile_result(save_records, db_path, table_name, command_key):
     if len(save_records) != 0:
         run_sql_statment(db_path, DATA_RECORDS_DEEPFIX, command_key, save_records, replace_table_name=table_name)
+
+
+if __name__ == '__main__':
+    df = read_deepfix_error_records()
+    total_error = sum(df['errorcount'].tolist())
+    print(total_error)
