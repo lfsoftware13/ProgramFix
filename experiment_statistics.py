@@ -152,3 +152,49 @@ config9 = {
     'real_result': 0.3645878136200717,
     'table_name': 'encoder_sample_config9_only_gru_with_token_action_only_sample_10',
 }
+
+
+config10 = {
+    # no finish
+    'result': '',
+    'config_name': 'encoder_sample_config10',
+    'encoder_type': 'ggnn',
+    'output_type': 'token_action',
+    'only_sample': True,
+    'best_model': '',
+    'run_result': 0,
+    'real_result': 0,
+    'table_name': '',
+}
+
+
+config11 = {
+    'result': '',
+    'config_name': 'encoder_sample_config11',
+    'encoder_type': 'mixed',
+    'output_type': 'token_action',
+    'only_sample': False,
+    'decoder_type': 'ffn',
+    'best_model': '',
+    'run_result': 0,
+    'real_result': 0,
+    'table_name': '',
+}
+
+
+config12 = {
+    'result': '''
+    correct_count: 2384/6975.0, correct: 0.3417921146953405
+    part_correct_count: 861/6975.0, part_correct: 0.12344086021505377
+    model_total_error: 16654, original_total_error: 16766.0, resolved: 0.006680186090898266
+    ''',
+    'config_name': 'encoder_sample_config12',
+    'encoder_type': 'rnn',
+    'output_type': 'token_action',
+    'only_sample': False,
+    'decoder_type': 'ffn',
+    'best_model': 'encoder_sample_config12_only_gru_with_token_action.pkl11',
+    'run_result': 0.3473193473193473,
+    'real_result': 0.3417921146953405,
+    'table_name': 'encoder_sample_config12_only_gru_with_token_action_11',
+}

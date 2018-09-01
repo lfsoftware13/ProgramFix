@@ -549,10 +549,13 @@ class EncoderSampleModel(nn.Module):
 
     def decoder_one_step(self, decoder_inputs, continue_mask, start_index, hidden, encoder_output, encoder_mask, copy_length,
                          ori_input_seq=None, input_length=None):
-        decoder_output, hidden, _ = self.decoder(inputs=self.embedding(decoder_inputs), encoder_hidden=hidden,
-                                            encoder_outputs=encoder_output, encoder_mask=~encoder_mask,
-                                            teacher_forcing_ratio=0)
-        decoder_output = torch.stack(decoder_output, dim=1)
+        if self.feedforward_output:
+            decoder_output = self.decoder(o=hidden, context=encoder_output, mask=~encoder_mask)
+        else:
+            decoder_output, hidden, _ = self.decoder(inputs=self.embedding(decoder_inputs), encoder_hidden=hidden,
+                                                encoder_outputs=encoder_output, encoder_mask=~encoder_mask,
+                                                teacher_forcing_ratio=0)
+            decoder_output = torch.stack(decoder_output, dim=1)
         copy_mask = create_sequence_length_mask(copy_length, max_len=encoder_output.shape[1])
 
         compatible_tokens, compatible_tokens_length = \

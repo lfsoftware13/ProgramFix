@@ -164,7 +164,9 @@ def pointer_network_with_ggnn_encoder(is_debug):
                                  "graph_type": "ggnn",
                                  "graph_itr": 3,
                                  "dropout_p": 0.2,
-                                 "mask_ast_node_in_rnn": False}
+                                 "mask_ast_node_in_rnn": False},
+             'mask_type': 'static',
+             'vocabulary': vocabulary,
              },
 
 
@@ -2107,7 +2109,7 @@ def encoder_sample_config12(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
 
@@ -2117,15 +2119,15 @@ def encoder_sample_config12(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2166,9 +2168,9 @@ def encoder_sample_config12(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config12_only_gru_with_token_action',
+        'table_basename': 'encoder_sample_config12_only_gru_with_token_action_7',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2216,7 +2218,7 @@ def encoder_sample_config12(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':

@@ -8,13 +8,14 @@ if __name__ == '__main__':
     # table_name = 'encoder_sample_dropout_overfitting'
     # table_name = 'graph_encoder_sample_config2_24'
     # table_name = 'graph_encoder_sample_config3_only_ggnn_with_sequence_link_79'
-    table_name = 'graph_encoder_sample_config3_only_ggnn_with_sequence_link_24'
+    # table_name = 'graph_encoder_sample_config3_only_ggnn_with_sequence_link_24'
     # table_name = 'encoder_sample_config4_20'
     # table_name = 'encoder_sample_config5_11'
     # table_name = 'encoder_sample_config6_only_gru_with_token_action_19'
     # table_name = 'encoder_sample_config7_only_ggnn_with_token_action_with_sequence_link_25'
     # table_name = 'encoder_sample_config8_15'
     # table_name = 'encoder_sample_config9_only_gru_with_token_action_only_sample_10'
+    table_name = 'encoder_sample_config12_only_gru_with_token_action_11'
 
     main_insert_unsample_records_to_database(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
     resave_original_errors_info_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
