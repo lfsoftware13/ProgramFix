@@ -35,8 +35,8 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        # torch_util.load_model(m, path, map_location={'cuda:0': 'cuda:1'})
-        torch_util.load_model(m, path)
+        torch_util.load_model(m, path, map_location={'cuda:0': 'cuda:1'})
+        # torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
         print("create new model")

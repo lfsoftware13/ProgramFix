@@ -1,0 +1,43 @@
+original_error
+<CODE> undeclared (first use in this function): 5425
+'j' undeclared (first use in this function)
+expected <CODE> before <CODE> token: 2158
+expected ';' before '}' token
+expected <CODE> before <CODE>: 1509
+expected ')' before 'b'
+expected expression before <CODE> token: 1315
+expected expression before '%' token
+expected identifier or <CODE> before <CODE>: 902
+expected identifier or '(' before 'else'
+expected identifier or <CODE> before <CODE> token: 834
+expected identifier or '(' before '}' token
+expected declaration or statement at end of input: 664
+expected declaration or statement at end of input
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 387
+expected '=', ',', ';', 'asm' or '__attribute__' before '>>' token
+expected expression before <CODE>: 276
+expected expression before 'int'
+<CODE> without a previous <CODE>: 269
+'else' without a previous 'if'
+
+encoder_sample_config4_20
+<CODE> undeclared (first use in this function): 2739
+'i' undeclared (first use in this function)
+expected identifier or <CODE> before <CODE> token: 1247
+expected identifier or '(' before '}' token
+expected identifier or <CODE> before <CODE>: 948
+expected identifier or '(' before 'if'
+expected <CODE> before <CODE> token: 567
+expected ';' before ')' token
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 423
+expected '=', ',', ';', 'asm' or '__attribute__' before '+' token
+expected expression before <CODE> token: 409
+expected expression before '}' token
+expected <CODE> before <CODE>: 382
+expected ';' before 'scanf'
+expected declaration or statement at end of input: 256
+expected declaration or statement at end of input
+too few arguments to function <CODE>: 169
+too few arguments to function 'pow'
+expected declaration specifiers or <CODE> before string constant: 168
+expected declaration specifiers or '...' before string constant
