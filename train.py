@@ -35,8 +35,8 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
     if load_previous:
-        torch_util.load_model(m, path, map_location={'cuda:0': 'cuda:1'})
-        # torch_util.load_model(m, path)
+        # torch_util.load_model(m, path, map_location={'cuda:0': 'cuda:1'})
+        torch_util.load_model(m, path)
         print("load previous model from {}".format(path))
     else:
         print("create new model")
@@ -421,7 +421,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        load_addition_generate_iterate_solver_train_dataset_fn=None,
                        max_save_distance=None, addition_step=1, no_addition_step=5,
                        do_save_records_to_database=False, change_output_records_to_batch_fn=None,
-                       create_save_database_records_fn=None):
+                       create_save_database_records_fn=None, just_evaluate=False):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -441,7 +441,7 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
 
     optimizer = optimizer(filter(lambda p: p.requires_grad, model.parameters()), lr=learning_rate, **optimizer_dict)
 
-    if load_previous:
+    if load_previous or just_evaluate:
         # valid_loss, valid_accuracy, valid_correct = evaluate(model=model, dataset=valid_dataset, batch_size=batch_size,
         #                                       loss_function=loss_fn, vocab=vocabulary, add_value_mask=add_value_mask)
         # test_evaluator, test_loss = evaluate(model=model, dataset=test_dataset, batch_size=batch_size,
@@ -783,7 +783,8 @@ if __name__ == '__main__':
                        max_save_distance=max_save_distance, addition_step=addition_step,
                        no_addition_step=no_addition_step, do_save_records_to_database=do_save_records_to_database,
                        change_output_records_to_batch_fn=change_output_records_to_batch_fn,
-                       create_save_database_records_fn=create_save_database_records_fn
+                       create_save_database_records_fn=create_save_database_records_fn,
+                       just_evaluate=just_evaluate,
                        )
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,

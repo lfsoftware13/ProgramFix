@@ -931,9 +931,13 @@ def create_records_all_output_for_beam(model_input, model_output, do_sample=Fals
         sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
         sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
 
-        input_seq = model_input[1]
-        copy_output = torch.gather(input_seq, index=copy_output_id, dim=-1)
-    sample_output_ids = torch.where(is_copy, copy_output, sample_output)
+        if not only_sample:
+            input_seq = model_input[1]
+            copy_output = torch.gather(input_seq, index=copy_output_id, dim=-1)
+    if only_sample:
+        sample_output_ids = sample_output
+    else:
+        sample_output_ids = torch.where(is_copy, copy_output, sample_output)
     return p1, p2, is_copy, copy_output, sample_output, sample_output_ids
 
 
