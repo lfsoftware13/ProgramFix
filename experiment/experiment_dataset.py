@@ -589,11 +589,13 @@ class SamplePackedDataset(CustomerDataSet):
 
 
 def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
-                                          do_multi_step_sample=False, merge_action=True, only_sample=False):
+                                          do_multi_step_sample=False, merge_action=True, only_sample=False, sequence_output=False):
     if is_debug:
-        data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten, merge_action=merge_action)
+        data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten, merge_action=merge_action,
+                                                                            sequence_output=sequence_output)
     else:
-        data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=do_flatten, merge_action=merge_action)
+        data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=do_flatten, merge_action=merge_action,
+                                                                 sequence_output=sequence_output)
     # if use_ast:
     #     vocabulary = load_graph_vocabulary(vocabulary)
 
@@ -611,11 +613,13 @@ def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer
 
 
 def load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
-                                          do_multi_step_sample=False, merge_action=True):
+                                          do_multi_step_sample=False, merge_action=True, sequence_output=False):
     if is_debug:
-        data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, merge_action=merge_action)
+        data_dict = load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, merge_action=merge_action,
+                                                                            sequence_output=sequence_output)
     else:
-        data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=False, merge_action=merge_action)
+        data_dict = load_fake_deepfix_dataset_iterate_error_data(do_flatten=False, merge_action=merge_action,
+                                                                 sequence_output=sequence_output)
     # if use_ast:
     #     vocabulary = load_graph_vocabulary(vocabulary)
 

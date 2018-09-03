@@ -48,6 +48,8 @@ def calculate_error_msg_count(db_path, table_name, key):
     error_list = list(more_itertools.collapse(df[key].tolist()))
     standard_error_list = [replace_itentifier(e) for e in error_list]
     c = stat_error_type_count(standard_error_list)
+    # c['expected identifier or <CODE> before <CODE> token'] = 0
+    # c['expected identifier or <CODE> before <CODE>'] = 0
     return c
 
 
@@ -71,6 +73,9 @@ def calculate_error_type_main2(db_path, table_name):
 def calculate_error_type_main(db_path, table_name):
     top_c = calculate_error_msg_count(db_path, table_name, 'original_errors')
     after_c = calculate_error_msg_count(db_path, table_name, 'errors')
+    top_sum = sum([i for i in top_c.values()])
+    after_sum = sum([i for i in after_c.values()])
+    print('part_error message: {}({})/ {} = {}'.format(after_sum, top_sum - after_sum, top_sum, (top_sum - after_sum)/top_sum))
 
     m = 0
     print('errors in {}'.format(table_name))
@@ -91,6 +96,6 @@ def calculate_error_type_main(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config4_20'
-    # calculate_error_type_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
-    calculate_error_type_main2(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
+    table_name = 'encoder_sample_config12_only_gru_with_token_action_11'
+    calculate_error_type_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
+    # calculate_error_type_main2(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

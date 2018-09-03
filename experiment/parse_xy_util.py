@@ -331,7 +331,7 @@ CODE_BEGIN = '<BEGIN>'
 CODE_END = '<END>'
 
 def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_fn=None, tokenize_fn=None,
-                                             merge_action=True):
+                                             merge_action=True, sequence_output=False):
     df['res'] = ''
     df['ac_code_obj'] = df['ac_code'].map(tokenize_fn)
     df = df[df['ac_code_obj'].map(lambda x: x is not None)].copy()
@@ -374,8 +374,18 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
     print('after extract_action_part_start_pos_fn : {}'.format(len(df)))
 
     # create input code and sample code according to action part and ac pos and error pos
-    df = df.apply(create_sample_error_position_with_iterate, raw=True, axis=1)
+    df = df.apply(create_sample_error_position_with_iterate, raw=True, axis=1, sequence_output=sequence_output)
     print('after create_sample_error_position_with_iterate : {}'.format(len(df)))
+
+    if sequence_output:
+        def set_pos_to_begin_and_end(one):
+            ac_pos_list = [(0, len(one['ac_code_name_with_labels']) - 1)]
+            error_pos_list = [(0, len(one['token_name_list'][0]) - 1)]
+            one['ac_pos_list'] = ac_pos_list
+            one['error_pos_list'] = error_pos_list
+            return one
+
+        df = df.apply(set_pos_to_begin_and_end, raw=True, axis=1)
 
     # do check multi token action
     check_multi_token_action = True
@@ -481,7 +491,7 @@ def create_sample_is_copy(one, keyword_ids):
     return one
 
 
-def create_sample_error_position_with_iterate(one):
+def create_sample_error_position_with_iterate(one, sequence_output=False):
 
     def cal_token_pos_bias(action_list, cur_action):
         bias = 0
@@ -552,6 +562,11 @@ def create_sample_error_position_with_iterate(one):
     one['token_name_list'] = code_token_list
     one['sample_ac_code_list'] = sample_ac_code_list
     one['sample_error_code_list'] = sample_error_code_list
+
+    if sequence_output:
+        one['token_name_list'] = [code_token_list[0]]
+        one['sample_ac_code_list'] = [one['ac_code_name_with_labels'][1:-1]]
+        one['sample_error_code_list'] = [code_token_list[0][1:-1]]
 
     return one
 

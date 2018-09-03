@@ -263,6 +263,16 @@ class GraphEncoder(nn.Module):
                 p2_seq = [seq.unsqueeze(0) for seq in p2_seq]
                 p2_seq = torch.cat(p2_seq, dim=0)
                 p2 = self.p2_pointer_network(p2_seq, query=torch.unsqueeze(p2_query, dim=1))
+            elif self.p2_type == 'sequence':
+                p1 = torch.ones(p1.shape).float().to(p1.device)
+                p1_sequence_mask = torch.zeros(p1.shape).byte().to(p1.device)
+                p1_sequence_mask[:, 0] = 1
+                p1.data.masked_fill_(~p1_sequence_mask, -float('inf'))
+                p2 = torch.ones(p1.shape).float().to(p1.device)
+                p2_sequence_mask = torch.zeros(p1.shape).byte().to(p1.device)
+                for i, c in enumerate(copy_length.tolist()):
+                    p2_sequence_mask[i, c-1] = 1
+                p2.data.masked_fill_(~p2_sequence_mask, -float('inf'))
             else:
                 raise ValueError("No p2_type is:{}".format(self.p2_type))
         else:
@@ -374,15 +384,20 @@ class EncoderSampleModel(nn.Module):
                                           pointer_type=pointer_type, graph_parameter=graph_parameter,
                                           embedding=self.embedding, embedding_size=embedding_size,
                                           p2_type=p2_type, p2_step_length=p2_step_length)
+
+        if p2_type == 'sequence':
+            inner = True
+        else:
+            inner = False
         self.slice_encoder = SliceEncoder(rnn_type=rnn_type, hidden_size=hidden_size // 2, n_layer=rnn_layer_number,
-                                          dropout_p=dropout_p)
+                                          dropout_p=dropout_p, inner=inner)
         # self.slice_encoder = SliceEncoder(rnn_type=rnn_type, hidden_size=hidden_size, n_layer=rnn_layer_number,
         #                                   dropout_p=dropout_p)
         self.feedforward_output = feedforward_output
         if feedforward_output:
             self.decoder = FeedForwardOutput(rnn_layer_number*hidden_size, hidden_size, rnn_layer_number, dropout_p)
         else:
-            self.decoder = DecoderRNN(vocab_size=vocabulary_size, max_len=max_sample_length, hidden_size=hidden_size,
+            self.decoder = DecoderRNN(vocab_size=vocabulary_size, max_len=self.max_sample_length, hidden_size=hidden_size,
                                       sos_id=inner_start_label, eos_id=inner_end_label, n_layers=rnn_layer_number, rnn_cell=rnn_type,
                                       bidirectional=False, input_dropout_p=dropout_p, dropout_p=dropout_p,
                                       use_attention=True)
@@ -420,6 +435,8 @@ class EncoderSampleModel(nn.Module):
         elif self.p2_type == 'step':
             p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, input_seq, copy_length, p1_target=p1_target)
             p2_target = p1_target + p2_target + 1
+        elif self.p2_type == 'sequence':
+            p1_o, p2_o, input_seq = self.graph_encoder(adjacent_matrix, input_seq, copy_length)
         else:
             raise ValueError("No p2_type is:{}".format(self.p2_type))
         slice_state = self.slice_encoder(p1_target, p2_target, input_seq, copy_length)\
@@ -652,7 +669,7 @@ class EncoderSampleModel(nn.Module):
                                        compatible_tokens_length, is_copy_target)
 
 
-def create_loss_fn(ignore_id, only_sample=False):
+def create_loss_fn(ignore_id, only_sample=False, sequence_output=False):
     bce_loss = nn.BCEWithLogitsLoss(reduce=False)
     cross_loss = nn.CrossEntropyLoss(ignore_index=ignore_id)
 
@@ -667,6 +684,9 @@ def create_loss_fn(ignore_id, only_sample=False):
         p2_loss = cross_loss(p2_o, p2_target)
         copy_loss = cross_loss(copy_output.permute(0, 2, 1), copy_target)
         sample_loss = cross_loss(sample_output.permute(0, 2, 1), sample_small_target)
+        if sequence_output:
+            p1_loss = 0
+            p2_loss = 0
         if not only_sample:
             return is_copy_loss + sample_loss + p1_loss + p2_loss + copy_loss
         else:
@@ -803,7 +823,7 @@ def expand_output_and_target_fn(ignore_token):
 
 
 def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabulary=None, use_ast=False, p2_type='static',
-                                          only_sample=False):
+                                          only_sample=False, one_step=False):
     def create_multi_step_next_input_batch(input_data, model_input, model_output, continue_list, direct_output=False):
         # output_record_list = create_records_all_output(model_input=model_input, model_output=model_output, do_sample=True)
         output_record_list = create_records_all_output_for_beam(model_input=model_input, model_output=model_output,
@@ -865,8 +885,11 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
             input_data['adj'] = adj
             input_data['input_length'] = input_length
 
-        for k in input_data.keys():
-            input_data[k] = [i if c else o for o, i, c in zip(original_input_data[k], input_data[k], continue_list)]
+        if not one_step:
+            for k in input_data.keys():
+                input_data[k] = [i if c else o for o, i, c in zip(original_input_data[k], input_data[k], continue_list)]
+        else:
+            continue_list = [True for _ in range(len(input_seq_name))]
 
         final_output = [next_inp[1:-1] for next_inp in input_data['input_seq']]
         return input_data, final_output, output_record_list, input_data['input_seq_name'], continue_list
@@ -927,13 +950,13 @@ def create_records_all_output_for_beam(model_input, model_output, do_sample=Fals
         is_copy = torch.sigmoid(is_copy) > 0.5
         if only_sample:
             is_copy = torch.zeros_like(is_copy).to(is_copy.device)
-        copy_output_id = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
+        copy_output = torch.squeeze(torch.topk(F.softmax(copy_output, dim=-1), dim=-1, k=1)[1], dim=-1)
         sample_output_id = torch.topk(F.softmax(sample_output, dim=-1), dim=-1, k=1)[1]
         sample_output = torch.squeeze(torch.gather(compatible_tokens, dim=-1, index=sample_output_id), dim=-1)
 
         if not only_sample:
             input_seq = model_input[1]
-            copy_output = torch.gather(input_seq, index=copy_output_id, dim=-1)
+            copy_output = torch.gather(input_seq, index=copy_output, dim=-1)
     if only_sample:
         sample_output_ids = sample_output
     else:
@@ -997,8 +1020,23 @@ def change_output_records_to_batch(output_records_list, sample_steps):
     return batch_steps_output_records
 
 
+def change_output_records_to_batch_fn(one_step):
+    def change_output_records_to_batch(output_records_list, sample_steps):
+        output_records_list = [[o.tolist() for o in s] for s in output_records_list]
+        batch_size = len(output_records_list[0][0])
+        if one_step:
+            sample_steps = [1 for _ in range(batch_size)]
+        batch_output_records = [[[o[i] for o in s] for s in output_records_list] for i in range(batch_size)]
+        batch_steps_output_records = [b[:s] for b, s in zip(batch_output_records, sample_steps)]
+        return batch_steps_output_records
+    return change_output_records_to_batch
+
+
+
+
+
 def create_save_database_records(batch_data, sample_steps, final_output_name_list, result_list,
-                                 batch_output_records):
+                                 batch_output_records, input_data):
     batch_size = len(batch_data['id'])
 
     records_list = []
@@ -1011,6 +1049,33 @@ def create_save_database_records(batch_data, sample_steps, final_output_name_lis
         sample_code_list = json.dumps(final_output_name_list[i])
         compile_res = 1 if result_list[i] else 0
         sample_step = sample_steps[i]
+        sample_records = json.dumps(batch_output_records[i])
+        one = (id, includes, code, sample_code, code_list, sample_code_list, compile_res, sample_step, sample_records)
+        records_list += [one]
+    return records_list
+
+
+def sensibility_create_save_database_records(batch_data, sample_steps, final_output_name_list, result_list,
+                                 batch_output_records, input_data):
+    batch_size = len(input_data['id'])
+
+    def search_batch_data_index(prog_id):
+        for i, prog in enumerate(batch_data['id']):
+            if prog == prog_id:
+                return i
+        return 0
+
+    records_list = []
+    for i in range(batch_size):
+        id = input_data['id'][i]
+        batch_id = search_batch_data_index(id)
+        includes = json.dumps(input_data['includes'][i])
+        code = ' '.join(batch_data['input_seq_name'][batch_id])
+        sample_code = ' '.join(final_output_name_list[i])
+        code_list = json.dumps(batch_data['input_seq_name'][batch_id])
+        sample_code_list = json.dumps(final_output_name_list[i])
+        compile_res = 1 if result_list[i] else 0
+        sample_step = sample_steps[batch_id]
         sample_records = json.dumps(batch_output_records[i])
         one = (id, includes, code, sample_code, code_list, sample_code_list, compile_res, sample_step, sample_records)
         records_list += [one]

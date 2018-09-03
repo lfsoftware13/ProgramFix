@@ -261,7 +261,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                 if save_records_to_database:
                     batch_output_records = change_output_records_to_batch_fn(output_records_list, sample_steps)
                     records_list = create_save_database_records_fn(batch_data, sample_steps, final_output_name_list, result_list,
-                                                 batch_output_records)
+                                                 batch_output_records, input_data)
                     save_records_list += records_list
 
                 step_output = 'in evaluate step {}: '.format(steps)

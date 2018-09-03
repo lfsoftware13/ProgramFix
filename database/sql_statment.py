@@ -137,24 +137,45 @@ CREATE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST = r'''CREATE TABLE IF NOT EXISTS s
 
 CREATE_MULTISTEP_SAMPLE_OUTPUT_RECORDS = r'''CREATE TABLE IF NOT EXISTS TABLENAME  (
   id TEXT PRIMARY KEY,
-  includes TEXT, 
+  includes TEXT,
   code TEXT,
   sample_code TEXT,
-  code_list TEXT, 
-  sample_code_list TEXT, 
+  code_list TEXT,
+  sample_code_list TEXT,
   compile_res INTEGER,
   sample_step INTEGER,
   sample_records TEXT,
-  distance INTEGER DEFAULT -1, 
-  modify_action_list TEXT DEFAULT '', 
+  distance INTEGER DEFAULT -1,
+  modify_action_list TEXT DEFAULT '',
   compile_info TEXT DEFAULT '',
   errors TEXT DEFAULT '',
-  error_count INTEGER DEFAULT -1, 
-  original_error_info TEXT DEFAULT '', 
-  original_errors TEXT DEFAULT '', 
-  original_error_count INTEGER DEFAULT -1 
+  error_count INTEGER DEFAULT -1,
+  original_error_info TEXT DEFAULT '',
+  original_errors TEXT DEFAULT '',
+  original_error_count INTEGER DEFAULT -1
   )
 '''
+
+# CREATE_MULTISTEP_SAMPLE_OUTPUT_RECORDS = r'''CREATE TABLE IF NOT EXISTS TABLENAME  (
+#   id TEXT,
+#   includes TEXT,
+#   code TEXT,
+#   sample_code TEXT,
+#   code_list TEXT,
+#   sample_code_list TEXT,
+#   compile_res INTEGER,
+#   sample_step INTEGER,
+#   sample_records TEXT,
+#   distance INTEGER DEFAULT -1,
+#   modify_action_list TEXT DEFAULT '',
+#   compile_info TEXT DEFAULT '',
+#   errors TEXT DEFAULT '',
+#   error_count INTEGER DEFAULT -1,
+#   original_error_info TEXT DEFAULT '',
+#   original_errors TEXT DEFAULT '',
+#   original_error_count INTEGER DEFAULT -1
+#   )
+# '''
 
 
 FIND_CPP_TESTCASE_DISTINCT_PROBLEM_USER_ID = r'''SELECT DISTINCT problem_user_id from cpp_testcase_error_records'''
@@ -172,6 +193,7 @@ INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TRAIN = r'''INSERT OR IGNORE INT
 INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_VALID = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_valid (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code, original_modify_action_list, original_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_SLK_SAMPLE_COMMON_C_ERROR_RECORDS_TEST = r'''INSERT OR IGNORE INTO slk_sample_common_c_error_records_test (id, problem_id, user_id, problem_user_id, includes, code, sample_code, similar_code, original_modify_action_list, original_distance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 INSERT_IGNORE_MULTISTEP_SAMPLE_OUTPUT_RECORDS = r'''INSERT OR IGNORE INTO TABLENAME (id, includes, code, sample_code, code_list, sample_code_list, compile_res, sample_step, sample_records) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'''
+# INSERT_IGNORE_MULTISTEP_SAMPLE_OUTPUT_RECORDS = r'''INSERT INTO TABLENAME (id, includes, code, sample_code, code_list, sample_code_list, compile_res, sample_step, sample_records) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'''
 
 UPDATE_SAMPLE_COMPILE_INFO = r'''UPDATE TABLENAME SET compile_info=? , errors=? , error_count=? WHERE id=?'''
 UPDATE_ORIGINAL_COMPILE_INFO = r'''UPDATE TABLENAME SET original_error_info=? , original_errors=? , original_error_count=? WHERE id=?'''

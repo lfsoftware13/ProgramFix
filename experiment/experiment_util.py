@@ -290,7 +290,7 @@ def load_deepfix_error_data():
 
 
 # @disk_cache(basename='load_fake_deepfix_dataset_iterate_error_data_sample_100', directory=CACHE_DATA_PATH)
-def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, merge_action=True):
+def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, merge_action=True, sequence_output=False):
     vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
                                                    end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
                                                    addition_tokens=['<PAD>'])
@@ -307,7 +307,7 @@ def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, me
 
     tokenize_fn = tokenize_by_clex_fn()
     parse_fn = parse_iterative_sample_action_error_code
-    parse_param = [vocab, action_list_sorted_no_reverse, tokenize_fn, merge_action]
+    parse_param = [vocab, action_list_sorted_no_reverse, tokenize_fn, merge_action, sequence_output]
 
     train_data = parse_fn(train, 'train', *parse_param)
     valid_data = parse_fn(valid, 'valid', *parse_param)
@@ -351,7 +351,7 @@ def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, me
 
 
 # @disk_cache(basename='load_fake_deepfix_dataset_iterate_error_data', directory=CACHE_DATA_PATH)
-def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False, merge_action=True):
+def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False, merge_action=True, sequence_output=False):
     vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
                                                    end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
                                                    addition_tokens=['<PAD>'])
@@ -364,7 +364,7 @@ def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False, merge_action=
 
     tokenize_fn = tokenize_by_clex_fn()
     parse_fn = parse_iterative_sample_action_error_code
-    parse_param = [vocab, action_list_sorted_no_reverse, tokenize_fn, merge_action]
+    parse_param = [vocab, action_list_sorted_no_reverse, tokenize_fn, merge_action, sequence_output]
 
     train_data = parse_fn(train, 'train', *parse_param)
     valid_data = parse_fn(valid, 'valid', *parse_param)

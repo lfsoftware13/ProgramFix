@@ -34,5 +34,5 @@ def draw_sample_step_main(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config4_20'
+    table_name = 'encoder_sample_config11_23'
     draw_sample_step_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

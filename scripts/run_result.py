@@ -15,7 +15,14 @@ if __name__ == '__main__':
     # table_name = 'encoder_sample_config7_only_ggnn_with_token_action_with_sequence_link_25'
     # table_name = 'encoder_sample_config8_15'
     # table_name = 'encoder_sample_config9_only_gru_with_token_action_only_sample_10'
-    table_name = 'encoder_sample_config12_only_gru_with_token_action_11'
+    # table_name = 'encoder_sample_config11_23'
+    # table_name = 'encoder_sample_config12_only_gru_with_token_action_11'
+    table_name = 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_22'
+    # table_name = 'encoder_sample_config14_11'
+    # table_name = 'encoder_sample_config14_20'
+    # table_name = 'encoder_sample_config16_only_gru_with_token_action_only_sample_14'
+    # table_name = 'sensibility_rnn_config2_81_filter'
+    # table_name = 'encoder_sample_config15_sequence_output_63'
 
     main_insert_unsample_records_to_database(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
     resave_original_errors_info_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

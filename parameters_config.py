@@ -6,7 +6,8 @@ from common.evaluate_util import SLKOutputAccuracyAndCorrect, EncoderCopyAccurac
 from common.opt import OpenAIAdam
 from common.pycparser_util import tokenize_by_clex_fn
 from model.encoder_sample_model import create_parse_input_batch_data_fn, create_records_all_output, \
-    change_output_records_to_batch, create_save_database_records
+    change_output_records_to_batch, create_save_database_records, sensibility_create_save_database_records, \
+    change_output_records_to_batch_fn
 from model.one_pointer_copy_self_attention_seq2seq_model_gammar_mask_refactor import load_sample_save_dataset, \
     create_save_sample_data
 from read_data.load_data_vocabulary import create_common_error_vocabulary, create_deepfix_common_error_vocabulary
@@ -2000,7 +2001,7 @@ def encoder_sample_config11(is_debug):
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config11_17',
+        'table_basename': 'encoder_sample_config11_23',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2276,7 +2277,7 @@ def encoder_sample_config13(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
 
@@ -2286,15 +2287,15 @@ def encoder_sample_config13(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2335,9 +2336,9 @@ def encoder_sample_config13(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link',
+        'table_basename': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_22',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2383,7 +2384,7 @@ def encoder_sample_config13(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
@@ -2439,7 +2440,7 @@ def encoder_sample_config14(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
     only_sample = True
@@ -2450,15 +2451,15 @@ def encoder_sample_config14(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False, only_sample=only_sample)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False, only_sample=only_sample)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2499,9 +2500,9 @@ def encoder_sample_config14(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config14',
+        'table_basename': 'encoder_sample_config14_20',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2554,7 +2555,7 @@ def encoder_sample_config14(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
@@ -2571,6 +2572,174 @@ def encoder_sample_config14(is_debug):
         'expand_output_and_target_fn': expand_output_and_target_fn(ignore_id),
         'create_output_ids_fn': create_output_ids_fn(inner_end_id, p2_type='step', only_sample=only_sample),
         'train_loss': create_loss_fn(ignore_id, only_sample=only_sample),
+        'evaluate_object_list': [ErrorPositionAndValueAccuracy(ignore_token=ignore_id)],
+
+        'ac_copy_train': False,
+        'ac_copy_radio': 0.2,
+
+        'epcohes': epoches,
+        'start_epoch': 12,
+        'epoch_ratio': epoch_ratio,
+        'learning_rate': 6.25e-5,
+        'batch_size': batch_size,
+        'clip_norm': 1,
+        'optimizer': OpenAIAdam,
+        'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
+                           't_total': epoch_ratio * epoches * train_len//batch_size, 'max_grad_norm': 10},
+        'data': datasets
+    }
+
+
+def encoder_sample_config15(is_debug):
+    vocabulary = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>'])
+    begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+    end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+    inner_begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[1])
+    inner_end_id = vocabulary.word_to_id(vocabulary.end_tokens[1])
+    pad_id = vocabulary.word_to_id(vocabulary.addition_tokens[0])
+    use_ast = True
+    if use_ast:
+        from experiment.experiment_dataset import load_graph_vocabulary
+        vocabulary = load_graph_vocabulary(vocabulary)
+    tokenize_fn = tokenize_by_clex_fn()
+    transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
+
+    batch_size = 16
+    epoches = 80
+    ignore_id = -1
+    max_length = 500
+    do_flatten = True
+    do_multi_step_sample = True
+    epoch_ratio = 1.0
+    addition_step = 3
+    sequence_output = True
+
+    from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
+        load_deeffix_error_iterative_dataset_real_test
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer, do_flatten=do_flatten,
+    #                                                  use_ast=use_ast, sequence_output=sequence_output)
+    from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
+    # datasets = load_deepfix_flatten_combine_node_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                                       mask_transformer=transformer,
+    #                                                                       do_flatten=do_flatten, use_ast=use_ast,
+    #                                                                       do_multi_step_sample=do_multi_step_sample,
+    #                                                                       sequence_output=sequence_output)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
+
+    # if is_debug:
+    #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
+    #     from experiment.experiment_dataset import IterateErrorDataSet
+    #     datasets = []
+    #     for t in load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten):
+    #         t = pd.DataFrame(t)
+    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length, do_flatten=do_flatten))
+    #     datasets.append(None)
+    # else:
+    #     from experiment.experiment_util import load_common_error_data_with_encoder_copy
+    #     from experiment.experiment_dataset import IterateErrorDataSet
+    #     datasets = []
+    #     for t in load_common_error_data_with_encoder_copy(inner_begin_id, inner_end_id):
+    #         t = pd.DataFrame(t)
+    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length))
+    #     datasets.append(None)
+
+    train_len = len(datasets[0]) * epoch_ratio if datasets[0] is not None else 100
+
+    from model.encoder_sample_model import EncoderSampleModel
+    from model.encoder_sample_model import create_parse_target_batch_data
+    from model.encoder_sample_model import create_loss_fn
+    from model.encoder_sample_model import create_output_ids_fn
+    from model.encoder_sample_model import expand_output_and_target_fn
+    from model.encoder_sample_model import create_multi_step_next_input_batch_fn
+    from model.encoder_sample_model import multi_step_print_output_records_fn
+    from experiment.experiment_dataset import load_addition_generate_iterate_solver_train_dataset_fn
+    return {
+        'name': 'encoder_sample_config15_sequence_output',
+        # 'name': 'graph_encoder_sample_config2_addition_data_retrain',
+        # 'name': 'reinforcement_graph_encoder_sample_config2_fast_iterate',
+        'save_name': 'encoder_sample_config15_sequence_output.pkl',
+        # 'save_name': 'graph_encoder_sample_config2_addition_data_retrain.pkl',
+        # 'save_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
+        'load_model_name': 'encoder_sample_config15_sequence_output.pkl',
+        # 'load_model_name': 'graph_encoder_sample_config2_addition_data_retrain.pkl',
+        # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
+        # 'logger_file_path': 'graph_encoder_sample_config2.log',
+
+        'do_save_records_to_database': True,
+        'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
+        'table_basename': 'encoder_sample_config15_sequence_output_63',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
+
+        'model_fn': EncoderSampleModel,
+        'model_dict':
+            {"start_label": begin_id,
+             "end_label": end_id,
+             "inner_start_label": inner_begin_id,
+             "inner_end_label": inner_end_id,
+             "vocabulary_size": vocabulary.vocabulary_size,
+             "embedding_size": 400,
+             "hidden_size": 400,
+             "max_sample_length": 500,
+             'graph_parameter': {"rnn_parameter": {'vocab_size': vocabulary.vocabulary_size,
+                                                   'max_len': max_length, 'input_size': 400,
+                                                   'input_dropout_p': 0.2, 'dropout_p': 0.2,
+                                                   'n_layers': 1, 'bidirectional': True, 'rnn_cell': 'gru',
+                                                   'variable_lengths': False, 'embedding': None,
+                                                   'update_embedding': True, },
+                                 "graph_type": "ggnn",
+                                 "graph_itr": 3,
+                                 "dropout_p": 0.2,
+                                 "mask_ast_node_in_rnn": False
+                                 },
+             'graph_embedding': 'mixed',
+             'pointer_type': 'query',
+             'rnn_type': 'gru',
+             "rnn_layer_number": 3,
+             "max_length": max_length,
+             'dropout_p': 0.2,
+             'pad_label': pad_id,
+             'vocabulary': vocabulary,
+             'mask_type': 'static',
+             'p2_type': 'sequence'
+             },
+
+        'random_embedding': False,
+        'use_ast': use_ast,
+
+        'do_sample_evaluate': False,
+
+        'do_multi_step_sample_evaluate': do_multi_step_sample,
+        'max_step_times': 10,
+        'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id,
+                                                                                       vocabulary=vocabulary, use_ast=use_ast),
+        'compile_file_path': '/dev/shm/main.c',
+        'target_file_path': '/dev/shm/main.out',
+        'extract_includes_fn': lambda x: x['includes'],
+        'multi_step_sample_evaluator': [],
+        'print_output': True,
+        'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
+
+        'load_addition_generate_iterate_solver_train_dataset_fn':
+            load_addition_generate_iterate_solver_train_dataset_fn(vocabulary, transformer, do_flatten=True,
+                                                                   use_ast=use_ast, do_multi_step_sample=False),
+        'max_save_distance': 15,
+        'addition_train': False,
+        'addition_step': addition_step,
+        'no_addition_step': 10,
+
+        'vocabulary': vocabulary,
+        'parse_input_batch_data_fn': create_parse_input_batch_data_fn(use_ast=True),
+        'parse_target_batch_data_fn': create_parse_target_batch_data(ignore_id),
+        'expand_output_and_target_fn': expand_output_and_target_fn(ignore_id),
+        'create_output_ids_fn': create_output_ids_fn(inner_end_id),
+        'train_loss': create_loss_fn(ignore_id, sequence_output=sequence_output),
         'evaluate_object_list': [ErrorPositionAndValueAccuracy(ignore_token=ignore_id)],
 
         'ac_copy_train': False,
@@ -2610,7 +2779,7 @@ def encoder_sample_config16(is_debug):
     ignore_id = -1
     max_length = 500
     do_flatten = True
-    do_multi_step_sample = False
+    do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
     only_sample = True
@@ -2621,15 +2790,15 @@ def encoder_sample_config16(is_debug):
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False, only_sample=only_sample)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False, only_sample=only_sample)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2670,9 +2839,9 @@ def encoder_sample_config16(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config16_only_gru_with_token_action_only_sample',
+        'table_basename': 'encoder_sample_config16_only_gru_with_token_action_only_sample_14',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2720,7 +2889,7 @@ def encoder_sample_config16(is_debug):
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': False,
+        'print_output': True,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
@@ -3572,7 +3741,8 @@ def sensibility_rnn_config2(is_debug):
     rnn_path = os.path.join(save_model_root, "rnn_baseline", "sensibility_rnn_config1.pkl81")
     from torch import nn
     rnn_model = nn.DataParallel(rnn_model.cuda(), device_ids=[0])
-    torch_util.load_model(rnn_model, rnn_path, map_location={'cuda:1': 'cuda:0'})
+    # torch_util.load_model(rnn_model, rnn_path, map_location={'cuda:1': 'cuda:0'})
+    torch_util.load_model(rnn_model, rnn_path)
     rnn_model = rnn_model.module.cpu()
 
     from model.encoder_sample_model import EncoderSampleModel
@@ -3587,21 +3757,21 @@ def sensibility_rnn_config2(is_debug):
     from model.sensibility_baseline.baseline_model import parse_input_batch_data_fn
     return {
         # 'name': 'graph_encoder_sample_config2',
-        'name': 'encoder_sample_config17_only_ggnn_with_token_action_with_sequence_link_only_sample',
+        'name': 'sensibility_rnn_config2',
         # 'name': 'reinforcement_graph_encoder_sample_config2_fast_iterate',
         # 'save_name': 'graph_encoder_sample_config2.pkl',
-        'save_name': 'encoder_sample_config17_only_ggnn_with_token_action_with_sequence_link_only_sample.pkl',
+        'save_name': 'sensibility_rnn_config2.pkl',
         # 'save_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'load_model_name': 'graph_encoder_sample_config2.pkl',
-        'load_model_name': 'encoder_sample_config17_only_ggnn_with_token_action_with_sequence_link_only_sample.pkl',
+        'load_model_name': 'sensibility_rnn_config2.pkl',
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'graph_encoder_sample_config17_only_ggnn_with_sequence_link',
-        'change_output_records_to_batch_fn': change_output_records_to_batch,
-        'create_save_database_records_fn': create_save_database_records,
+        'table_basename': 'sensibility_rnn_config2_81',
+        'change_output_records_to_batch_fn': change_output_records_to_batch_fn(one_step=True),
+        'create_save_database_records_fn': sensibility_create_save_database_records,
 
         'model_fn': FixModel,
         'model_dict':
@@ -3616,10 +3786,11 @@ def sensibility_rnn_config2(is_debug):
         'do_sample_evaluate': False,
 
         'do_multi_step_sample_evaluate': do_multi_step_sample,
-        'max_step_times': 10,
+        'max_step_times': 1,
         'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id,
                                                                                        vocabulary=vocabulary, use_ast=use_ast,
-                                                                                       p2_type='step', only_sample=only_sample),
+                                                                                       p2_type='step', only_sample=only_sample,
+                                                                                       one_step=True),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
         'extract_includes_fn': lambda x: x['includes'],

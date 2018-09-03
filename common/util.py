@@ -733,8 +733,8 @@ def compile_c_code_by_gcc(code, file_path, target_file_path='main.out', add_pid=
     # print(code)
     if log_file_path is None:
         # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
-        # res = os.system('gcc -o {} -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
-        res = os.system('gcc -o {} -std=gnu99 {} > nul 2> nul'.format(target_file_path, file_path))
+        res = os.system('gcc -o {} -std=gnu99 {} >/dev/null 2>/dev/null'.format(target_file_path, file_path))
+        # res = os.system('gcc -o {} -std=gnu99 {} > nul 2> nul'.format(target_file_path, file_path))
     else:
         log_file_path = add_pid_to_file_path(log_file_path)
         # res = os.system('gcc -o {} -pedantic-errors -std=gnu99 {} >{} 2>&1'.format(target_file_path, file_path, log_file_path))
@@ -1087,9 +1087,10 @@ def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, 
     code_index_dict = []
 
     count_i = 0
-    for code_list, con, includes, res in zip(final_output, continue_list, includes_list, result_list):
+    for code_list, con, includes in zip(final_output, continue_list, includes_list):
         if not con:
             cur_continue[count_i] = False
+            res = result_list[count_i]
             cur_result_list[count_i] = res
             count_i += 1
             continue

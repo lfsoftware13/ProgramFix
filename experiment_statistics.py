@@ -169,16 +169,20 @@ config10 = {
 
 
 config11 = {
-    'result': '',
+    'result': '''
+    correct_count: 3974/6975.0, correct: 0.5697491039426523
+    part_correct_count: 947/6975.0, part_correct: 0.13577060931899643
+    model_total_error: 11119, original_total_error: 16766.0, resolved: 0.3368125969223429
+    ''',
     'config_name': 'encoder_sample_config11',
     'encoder_type': 'mixed',
     'output_type': 'token_action',
     'only_sample': False,
     'decoder_type': 'ffn',
-    'best_model': '',
-    'run_result': 0,
-    'real_result': 0,
-    'table_name': '',
+    'best_model': 'encoder_sample_config11.pkl23',
+    'run_result': 0.578962703962704,
+    'real_result': 0.5697491039426523,
+    'table_name': 'encoder_sample_config11_23',
 }
 
 
@@ -197,4 +201,89 @@ config12 = {
     'run_result': 0.3473193473193473,
     'real_result': 0.3417921146953405,
     'table_name': 'encoder_sample_config12_only_gru_with_token_action_11',
+}
+
+
+config13 = {
+    'result': '''
+    correct_count: 2092/6975.0, correct: 0.2999283154121864
+    part_correct_count: 724/6975.0, part_correct: 0.10379928315412186
+    model_total_error: 21516, original_total_error: 16766.0, resolved: -0.2833114636764882
+    ''',
+    'config_name': 'encoder_sample_config12',
+    'encoder_type': 'rnn',
+    'output_type': 'token_action',
+    'only_sample': False,
+    'decoder_type': 'ffn',
+    'best_model': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link.pkl22',
+    'run_result': 0.30495626822157434,
+    'real_result': 0.2999283154121864,
+    'table_name': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_22',
+}
+
+
+config14 = {
+    'result': '''
+    correct_count: 3312/6975.0, correct: 0.47483870967741937
+    part_correct_count: 1013/6975.0, part_correct: 0.14523297491039427
+    model_total_error: 10344, original_total_error: 16766.0, resolved: 0.383037098890612
+    ''',
+    'config_name': 'encoder_sample_config14',
+    'encoder_type': 'mixed',
+    'output_type': 'token_action',
+    'only_sample': True,
+    'decoder_type': 'ffn',
+    'best_model': 'encoder_sample_config14.pkl20',
+    'run_result': 0.4825174825174825,
+    'real_result': 0.47483870967741937,
+    'table_name': 'encoder_sample_config14_20',
+}
+
+
+config15 = {
+    'result': '''
+    correct_count: 2623/6975.0, correct: 0.3760573476702509
+    part_correct_count: 1550/6975.0, part_correct: 0.2222222222222222
+    model_total_error: 10783, original_total_error: 16766.0, resolved: 0.3568531551950376
+    ''',
+    'config_name': 'encoder_sample_config15',
+    'encoder_type': 'mixed',
+    'output_type': 'sequence',
+    'only_sample': False,
+    'best_model': 'encoder_sample_config15_sequence_output.pkl63',
+    'run_result': 0.38213869463869465,
+    'real_result': 0.3760573476702509,
+    'table_name': 'encoder_sample_config15_sequence_output_63',
+}
+
+
+config16 = {
+    'result': '''
+    correct_count: 2561/6975.0, correct: 0.367168458781362
+    part_correct_count: 1071/6975.0, part_correct: 0.15354838709677418
+    model_total_error: 12500, original_total_error: 16766.0, resolved: 0.25444351664082066
+    ''',
+    'config_name': 'encoder_sample_config16',
+    'encoder_type': 'rnn',
+    'output_type': 'token_action',
+    'only_sample': True,
+    'decoder_type': 'fnn',
+    'best_model': 'encoder_sample_config16_only_gru_with_token_action_only_sample_14.pkl14',
+    'run_result': 0.3731060606060606,
+    'real_result': 0.367168458781362,
+    'table_name': 'encoder_sample_config16_only_gru_with_token_action_only_sample_14',
+}
+
+
+sensibility_config_2 = {
+    'result': '''
+    correct_count: 60/6975.0, correct: 0.008602150537634409
+    part_correct_count: 937/6975.0, part_correct: 0.134336917562724
+    model_total_error: 26643, original_total_error: 16766.0, resolved: -0.5891089108910892
+    ''',
+    'config_name': 'sensibility_rnn_config2',
+    'best_model': 'sensibility_rnn_config2.pkl81',
+    'run_result': 0,
+    'real_result': 0.008602150537634409,
+    'table_name': 'sensibility_rnn_config2_81_filter',
 }

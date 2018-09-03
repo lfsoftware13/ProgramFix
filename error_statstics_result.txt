@@ -1,3 +1,39 @@
+code level
+<CODE> undeclared (first use in this function): 1672(1749) \ 3421
+expected <CODE> before <CODE> token: 371(1298) \ 1669
+expected <CODE> before <CODE>: 215(1115) \ 1330
+expected expression before <CODE> token: 261(772) \ 1033
+expected identifier or <CODE> before <CODE> token: 646(70) \ 716
+expected identifier or <CODE> before <CODE>: 633(7) \ 640
+expected declaration or statement at end of input: 163(408) \ 571
+expected expression before <CODE>: 177(56) \ 233
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 256(-26) \ 230
+expected statement before <CODE> token: 62(165) \ 227
+
+error message level
+<CODE> undeclared (first use in this function): 2632(2793) \ 5425
+expected <CODE> before <CODE> token: 474(1684) \ 2158
+expected <CODE> before <CODE>: 268(1241) \ 1509
+expected expression before <CODE> token: 339(976) \ 1315
+expected identifier or <CODE> before <CODE>: 1385(-483) \ 902
+expected identifier or <CODE> before <CODE> token: 2264(-1430) \ 834
+expected declaration or statement at end of input: 188(476) \ 664
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 705(-318) \ 387
+expected expression before <CODE>: 185(91) \ 276
+<CODE> without a previous <CODE>: 106(163) \ 269
+expected statement before <CODE> token: 79(187) \ 266
+
+
+
+
+
+
+
+
+
+
+
+
 original_error
 <CODE> undeclared (first use in this function): 5425
 'j' undeclared (first use in this function)
