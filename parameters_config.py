@@ -2001,7 +2001,7 @@ def encoder_sample_config11(is_debug):
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config11_23',
+        'table_basename': 'encoder_sample_config11_23_one_step',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2046,7 +2046,7 @@ def encoder_sample_config11(is_debug):
         'do_sample_evaluate': False,
 
         'do_multi_step_sample_evaluate': do_multi_step_sample,
-        'max_step_times': 10,
+        'max_step_times': 1,
         'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id,
                                                                                        vocabulary=vocabulary, use_ast=use_ast,
                                                                                        p2_type='step'),

@@ -32,8 +32,10 @@ def calculate_error_solver(df):
                                                                                  original_total_error, resolved))
 
 
-def stat_main(db_path, table_name, compile_result=True, part_correct=True, error_solver=True):
+def stat_main(db_path, table_name, compile_result=True, part_correct=True, error_solver=True, max_sample_step=None):
     df = read_experiment_result_df(db_path, table_name)
+    if max_sample_step is not None:
+        df = df[df['sample_step'].map(lambda x: x <= max_sample_step)]
     if compile_result:
         calculate_compile_result(df)
     if part_correct:

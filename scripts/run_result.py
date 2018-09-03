@@ -16,8 +16,9 @@ if __name__ == '__main__':
     # table_name = 'encoder_sample_config8_15'
     # table_name = 'encoder_sample_config9_only_gru_with_token_action_only_sample_10'
     # table_name = 'encoder_sample_config11_23'
+    table_name = 'encoder_sample_config11_23_one_step'
     # table_name = 'encoder_sample_config12_only_gru_with_token_action_11'
-    table_name = 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_22'
+    # table_name = 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_22'
     # table_name = 'encoder_sample_config14_11'
     # table_name = 'encoder_sample_config14_20'
     # table_name = 'encoder_sample_config16_only_gru_with_token_action_only_sample_14'
@@ -31,3 +32,5 @@ if __name__ == '__main__':
                                           do_compile_original=False)
     stat_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name, compile_result=True,
               part_correct=True, error_solver=True)
+    # stat_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name, compile_result=True,
+    #           part_correct=True, error_solver=True, max_sample_step=1)

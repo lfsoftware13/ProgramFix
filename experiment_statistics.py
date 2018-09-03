@@ -183,6 +183,16 @@ config11 = {
     'run_result': 0.578962703962704,
     'real_result': 0.5697491039426523,
     'table_name': 'encoder_sample_config11_23',
+
+
+    'one_step_result': '''
+    correct_count: 2163/6975.0, correct: 0.31010752688172044
+    part_correct_count: 1880/6975.0, part_correct: 0.26953405017921145
+    model_total_error: 12170, original_total_error: 16766.0, resolved: 0.2741262078015031
+    ''',
+    'one_step_run_result': 0.3151223776223776,
+    'one_step_real_result': 0.31010752688172044,
+
 }
 
 
@@ -210,7 +220,7 @@ config13 = {
     part_correct_count: 724/6975.0, part_correct: 0.10379928315412186
     model_total_error: 21516, original_total_error: 16766.0, resolved: -0.2833114636764882
     ''',
-    'config_name': 'encoder_sample_config12',
+    'config_name': 'encoder_sample_config13',
     'encoder_type': 'rnn',
     'output_type': 'token_action',
     'only_sample': False,
