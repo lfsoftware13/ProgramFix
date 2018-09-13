@@ -426,6 +426,24 @@ def load_deepfix_error_data_for_iterate():
     return deepfix_dict
 
 
+def load_customer_code_data_for_iterate(df):
+    vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>'])
+    # df = read_deepfix_error_data()
+    df = convert_deepfix_to_c_code(df)
+
+    tokenize_fn = tokenize_by_clex_fn()
+    parse_test_param = [vocab, tokenize_fn, True]
+    df_data = parse_test_tokens(df, 'deepfix', *parse_test_param)
+
+    df = df.loc[df_data[0].index.values]
+
+    deepfix_dict = {'error_token_id_list': df_data[0], 'includes': df['includes'], 'distance': df['errorcount'],
+                    'error_token_name_list': df_data[1], 'id': df['code_id']}
+    return deepfix_dict
+
+
 # @disk_cache(basename='load_deepfix_ac_data_for_generator', directory=CACHE_DATA_PATH)
 def load_deepfix_ac_data_for_generator(filter_unk=False):
     vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],

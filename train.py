@@ -211,7 +211,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
 
     with tqdm(total=len(dataset)) as pbar:
         with torch.no_grad():
-            for batch_data in data_loader(dataset, batch_size=batch_size, drop_last=True):
+            for batch_data in data_loader(dataset, batch_size=batch_size, drop_last=False):
                 model.zero_grad()
 
                 input_data = batch_data.copy()
@@ -287,8 +287,11 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
         create_table(db_path, DATA_RECORDS_DEEPFIX, replace_table_name=table_name)
         run_sql_statment(db_path, DATA_RECORDS_DEEPFIX, 'insert_ignore', save_records_list, replace_table_name=table_name)
 
-
-    return evaluate_obj_list, (total_loss / steps).item(), save_data_dict
+    if steps == 0:
+        t_loss = 0
+    else:
+        t_loss = (total_loss / steps).item()
+    return evaluate_obj_list, t_loss, save_data_dict
 
 
 def sample_and_save(model, dataset, batch_size, loss_function, parse_input_batch_data_fn, parse_target_batch_data_fn,

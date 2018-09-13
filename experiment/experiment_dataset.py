@@ -7,7 +7,7 @@ from common.util import CustomerDataSet, show_process_map, OrderedList
 from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data_sample_100, \
     load_fake_deepfix_dataset_iterate_error_data, load_deepfix_error_data_for_iterate, \
     load_deepfix_ac_data_for_generator, load_deepfix_ac_data_for_generator_100, \
-    load_generate_code_for_solver_model_iterate_data
+    load_generate_code_for_solver_model_iterate_data, load_customer_code_data_for_iterate
 from read_data.load_data_vocabulary import create_deepfix_common_error_vocabulary
 from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
 from vocabulary.word_vocabulary import Vocabulary
@@ -729,8 +729,11 @@ def load_graph_vocabulary(vocabulary):
 
 
 def load_deeffix_error_iterative_dataset_real_test(vocabulary, mask_transformer, do_flatten=False, use_ast=False,
-                                                   do_multi_step_sample=True):
-    data_dict = load_deepfix_error_data_for_iterate()
+                                                   do_multi_step_sample=True, customer_df=None):
+    if customer_df is not None:
+        data_dict = load_customer_code_data_for_iterate(customer_df)
+    else:
+        data_dict = load_deepfix_error_data_for_iterate()
     test_dataset = IterateErrorDataSet(pd.DataFrame(data_dict), vocabulary, 'deepfix',
                                    transformer_vocab_slk=mask_transformer, do_flatten=do_flatten, use_ast=use_ast,
                                        do_multi_step_sample=do_multi_step_sample)

@@ -198,19 +198,19 @@ config11 = {
 
 config12 = {
     'result': '''
-    correct_count: 2384/6975.0, correct: 0.3417921146953405
-    part_correct_count: 861/6975.0, part_correct: 0.12344086021505377
-    model_total_error: 16654, original_total_error: 16766.0, resolved: 0.006680186090898266
+    correct_count: 2548/6975.0, correct: 0.3653046594982079
+    part_correct_count: 1129/6975.0, part_correct: 0.16186379928315411
+    model_total_error: 12628, original_total_error: 16766.0, resolved: 0.2468090182512227
     ''',
     'config_name': 'encoder_sample_config12',
     'encoder_type': 'rnn',
     'output_type': 'token_action',
     'only_sample': False,
     'decoder_type': 'ffn',
-    'best_model': 'encoder_sample_config12_only_gru_with_token_action.pkl11',
-    'run_result': 0.3473193473193473,
-    'real_result': 0.3417921146953405,
-    'table_name': 'encoder_sample_config12_only_gru_with_token_action_11',
+    'best_model': 'encoder_sample_config12_only_gru_with_token_action.pkl21',
+    'run_result': 0.37056428155904597,
+    'real_result': 0.3653046594982079,
+    'table_name': 'encoder_sample_config12_only_gru_with_token_action_21',
 }
 
 
