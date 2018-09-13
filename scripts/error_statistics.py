@@ -96,6 +96,6 @@ def calculate_error_type_main(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config12_only_gru_with_token_action_11'
-    calculate_error_type_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
-    # calculate_error_type_main2(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
+    table_name = 'encoder_sample_config11_23'
+    # calculate_error_type_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
+    calculate_error_type_main2(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

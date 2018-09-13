@@ -11,15 +11,15 @@ def draw_line_figure(bin_list, name_list):
     data_list = [list(zip(*items)) for items in items_list]
 
     f = plt.figure(figsize=(4, 3))
-    plt.plot(data_list[0][0], data_list[0][1], linewidth=2.0, label=name_list[0])
-    plt.plot(data_list[1][0], data_list[1][1], linewidth=2.0, label=name_list[1])
-    plt.plot(data_list[2][0], data_list[2][1], linewidth=2.0, label=name_list[2])
+    plt.plot(data_list[0][0], data_list[0][1], linewidth=2.0, label=name_list[0], linestyle="-")
+    plt.plot(data_list[1][0], data_list[1][1], linewidth=2.0, label=name_list[1], linestyle="--")
+    plt.plot(data_list[2][0], data_list[2][1], linewidth=2.0, label=name_list[2], linestyle=":")
     plt.xlabel('Code Length')
     plt.ylabel('Metrics')
     plt.yticks(np.linspace(0, 1, 6))
-    plt.legend(fontsize=9, )
+    plt.legend(fontsize=8, )
     plt.show()
-    f.savefig('code_score_line_figure.pdf', bbox_inches='tight', dpi=300)
+    f.savefig('code_score_line_figure.png', bbox_inches='tight', dpi=300)
 
 
 def transform_bin_id(length):

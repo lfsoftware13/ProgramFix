@@ -17,7 +17,7 @@ def step_bar_figure(c):
     plt.xticks(ind, [str(i) for i in ind])
 
     plt.show()
-    f.savefig('sample_steps_count.pdf', bbox_inches='tight', dpi=300)
+    f.savefig('sample_steps_count.png', bbox_inches='tight', dpi=300)
 
 
 def draw_sample_step_main(db_path, table_name):
