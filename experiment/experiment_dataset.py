@@ -7,7 +7,8 @@ from common.util import CustomerDataSet, show_process_map, OrderedList
 from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data_sample_100, \
     load_fake_deepfix_dataset_iterate_error_data, load_deepfix_error_data_for_iterate, \
     load_deepfix_ac_data_for_generator, load_deepfix_ac_data_for_generator_100, \
-    load_generate_code_for_solver_model_iterate_data, load_customer_code_data_for_iterate
+    load_generate_code_for_solver_model_iterate_data, load_customer_code_data_for_iterate, \
+    load_common_error_dataset_iterate_error_data, load_common_error_dataset_iterate_error_data_100
 from read_data.load_data_vocabulary import create_deepfix_common_error_vocabulary
 from vocabulary.transform_vocabulary_and_parser import TransformVocabularyAndSLK
 from vocabulary.word_vocabulary import Vocabulary
@@ -586,6 +587,30 @@ class SamplePackedDataset(CustomerDataSet):
         new_dataset = self.datasets + dataset
         new_packed_dataset = SamplePackedDataset(new_dataset, self.data_len)
         return new_packed_dataset
+
+
+def load_common_error_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,
+                                          do_multi_step_sample=False, merge_action=True, only_sample=False, sequence_output=False):
+    if is_debug:
+        data_dict = load_common_error_dataset_iterate_error_data_100(do_flatten=do_flatten, merge_action=merge_action,
+                                                                            sequence_output=sequence_output)
+    else:
+        data_dict = load_common_error_dataset_iterate_error_data(do_flatten=do_flatten, merge_action=merge_action,
+                                                                 sequence_output=sequence_output)
+    # if use_ast:
+    #     vocabulary = load_graph_vocabulary(vocabulary)
+
+    datasets = [IterateErrorDataSet(pd.DataFrame(dd), vocabulary, name, transformer_vocab_slk=mask_transformer,
+                                    do_flatten=do_flatten, use_ast=use_ast, do_multi_step_sample=do_multi_step_sample,
+                                    only_smaple=only_sample)
+                for dd, name in zip(data_dict, ["train", "all_valid", "all_test"])]
+    for d, n in zip(datasets, ["train", "val", "test"]):
+        info_output = "There are {} parsed data in the {} dataset".format(len(d), n)
+        print(info_output)
+        # info(info_output)
+
+    train_dataset, valid_dataset, test_dataset = datasets
+    return train_dataset, valid_dataset, test_dataset, None
 
 
 def load_deepfix_sample_iterative_dataset(is_debug, vocabulary, mask_transformer, do_flatten=False, use_ast=False,

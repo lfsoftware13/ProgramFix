@@ -347,6 +347,19 @@ def parse_iterative_sample_action_error_code(df, data_type, keyword_vocab, sort_
 # sort and filter action list
     if sort_fn is not None:
         df['action_token_list'] = df['action_token_list'].map(sort_fn)
+
+    # filter {{, }}, +++, ;; action
+    def filter_special_multi_token_action(action_list):
+        special_error_action = ['{{', '}}', '+++', ';;', '[[', ']]', '((', '))', ',,', '===', '&&&', '**', '|||',
+                                '%%', '---', '::', '#']
+        action_list = [a if a['from_char'] not in special_error_action
+                            and a['to_char'] not in special_error_action else None
+         for a in action_list]
+        action_list = list(filter(lambda x: x != None, action_list))
+        return action_list
+    df['action_token_list'] = df['action_token_list'].map(filter_special_multi_token_action)
+    df = df[df['action_token_list'].map(lambda x: x is not None and len(x) > 0)]
+
     print('before filter action: {}'.format(len(df['action_token_list'])))
     df['action_token_list'] = df['action_token_list'].map(filter_repeat_action_list)
     df = df[df['action_token_list'].map(lambda x: x is not None)]

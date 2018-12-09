@@ -221,7 +221,7 @@ config13 = {
     model_total_error: 21516, original_total_error: 16766.0, resolved: -0.2833114636764882
     ''',
     'config_name': 'encoder_sample_config13',
-    'encoder_type': 'rnn',
+    'encoder_type': 'ggnn',
     'output_type': 'token_action',
     'only_sample': False,
     'decoder_type': 'ffn',
@@ -296,4 +296,38 @@ sensibility_config_2 = {
     'run_result': 0,
     'real_result': 0.008602150537634409,
     'table_name': 'sensibility_rnn_config2_81_filter',
+}
+
+
+config18 = {
+    'result': '''
+    correct_count: 2984/6975.0, correct: 0.4278136200716846
+    part_correct_count: 922/6975.0, part_correct: 0.13218637992831542
+    model_total_error: 13208, original_total_error: 16766.0, resolved: 0.21221519742335682''',
+    'config_name': 'encoder_sample_config18',
+    'dataset': 'codeforces',
+    'encoder_type': 'mixed',
+    'output_type': 'token_action',
+    'only_sample': False,
+    'decoder_type': 'ffn',
+    'best_model': 'encoder_sample_config18.pkl26',
+    'run_result': 0.4344154898820789,
+    'real_result': 0.4278136200716846,
+    'table_name': 'encoder_sample_config18_26',
+
+}
+
+
+config19 = {
+    'result': '''''',
+    'config_name': 'encoder_sample_config19',
+    'dataset': 'codeforces',
+    'encoder_type': 'rnn',
+    'output_type': 'token_action',
+    'only_sample': False,
+    'decoder_type': 'ffn',
+    'best_model': '',
+    'run_result': 0,
+    'real_result': 0,
+    'table_name': '',
 }

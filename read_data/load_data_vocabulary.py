@@ -46,7 +46,9 @@ def get_common_error_vocabulary_id_map():
 
 @disk_cache(basename='create_common_error_vocabulary', directory=CACHE_DATA_PATH)
 def create_common_error_vocabulary(begin_tokens, end_tokens, unk_token, addition_tokens=None):
-    vocab = load_vocabulary(get_common_error_vocabulary_set, get_common_error_vocabulary_id_map, begin_tokens=begin_tokens, end_tokens=end_tokens, unk_token=unk_token, addition_tokens=addition_tokens)
+    vocab = load_vocabulary(get_common_error_vocabulary_set, get_common_error_vocabulary_id_map,
+                            begin_tokens=begin_tokens, end_tokens=end_tokens, unk_token=unk_token,
+                            addition_tokens=addition_tokens)
     return vocab
 
 

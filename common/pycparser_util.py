@@ -1,4 +1,5 @@
 import os
+from parser import ParserError
 
 from c_parser.buffered_clex import BufferedCLex
 from c_parser.pycparser.pycparser import CParser
@@ -39,6 +40,8 @@ def tokenize_by_clex(code, lexer):
     # print('code: ', code)
     global tokenize_error_count, count
     try:
+        if '#' in code:
+            return None
         if count % 1000 == 0:
             print('tokenize: {}'.format(count))
         count += 1
@@ -50,6 +53,9 @@ def tokenize_by_clex(code, lexer):
         # print('IndexError: ', e)
         tokenize_error_count += 1
         # print('token_buffer_len:{}'.format(len(lexer._tokens_buffer)))
+        return None
+    except ParserError as a:
+        tokenize_error_count += 1
         return None
     except Exception as a:
         # print('error: ', a)

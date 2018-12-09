@@ -1,6 +1,7 @@
 from common.constants import pre_defined_c_tokens, pre_defined_c_library_tokens, \
     SLK_SAMPLE_COMMON_C_ERROR_RECORDS_BASENAME
-from config import SLK_SAMPLE_DBPATH, DATA_RECORDS_DEEPFIX_DBPATH, save_model_root
+from config import SLK_SAMPLE_DBPATH, DATA_RECORDS_DEEPFIX_DBPATH, save_model_root, \
+    DATA_RECORDS_DEEPFIX_CODEFORCES_TRAIN_DBPATH
 from common.evaluate_util import SLKOutputAccuracyAndCorrect, EncoderCopyAccuracyAndCorrect, \
     ErrorPositionAndValueAccuracy, SensibilityRNNEvaluator
 from common.opt import OpenAIAdam
@@ -1989,7 +1990,7 @@ return 0 ;
     # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
-    from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
+    # from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
     datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
                                                      mask_transformer=transformer,
                                                      do_flatten=do_flatten, use_ast=use_ast,
@@ -3853,6 +3854,342 @@ def sensibility_rnn_config2(is_debug):
         'expand_output_and_target_fn': expand_output_and_target_fn(ignore_id),
         'create_output_ids_fn': create_output_ids_fn(inner_end_id, p2_type='step', only_sample=only_sample),
         'train_loss': create_loss_fn(ignore_id, only_sample=only_sample),
+        'evaluate_object_list': [ErrorPositionAndValueAccuracy(ignore_token=ignore_id)],
+
+        'ac_copy_train': False,
+        'ac_copy_radio': 0.2,
+
+        'epcohes': epoches,
+        'start_epoch': 0,
+        'epoch_ratio': epoch_ratio,
+        'learning_rate': 6.25e-5,
+        'batch_size': batch_size,
+        'clip_norm': 1,
+        'optimizer': OpenAIAdam,
+        'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
+                           't_total': epoch_ratio * epoches * train_len//batch_size, 'max_grad_norm': 10},
+        'data': datasets
+    }
+
+
+def encoder_sample_config18(is_debug):
+    vocabulary = create_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>'])
+    begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+    end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+    inner_begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[1])
+    inner_end_id = vocabulary.word_to_id(vocabulary.end_tokens[1])
+    pad_id = vocabulary.word_to_id(vocabulary.addition_tokens[0])
+    use_ast = True
+    if use_ast:
+        from experiment.experiment_dataset import load_graph_vocabulary
+        vocabulary = load_graph_vocabulary(vocabulary)
+    tokenize_fn = tokenize_by_clex_fn()
+    transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
+
+    batch_size = 16
+    epoches = 80
+    ignore_id = -1
+    max_length = 500
+    do_flatten = True
+    do_multi_step_sample = True
+    epoch_ratio = 0.4
+    addition_step = 3
+
+    from experiment.experiment_dataset import load_common_error_sample_iterative_dataset, \
+        load_deeffix_error_iterative_dataset_real_test
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer, do_flatten=do_flatten,
+    #                                                  use_ast=use_ast)
+    # from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
+    # datasets = load_common_error_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample,
+                                                              customer_df=None)
+
+    # if is_debug:
+    #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
+    #     from experiment.experiment_dataset import IterateErrorDataSet
+    #     datasets = []
+    #     for t in load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten):
+    #         t = pd.DataFrame(t)
+    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length, do_flatten=do_flatten))
+    #     datasets.append(None)
+    # else:
+    #     from experiment.experiment_util import load_common_error_data_with_encoder_copy
+    #     from experiment.experiment_dataset import IterateErrorDataSet
+    #     datasets = []
+    #     for t in load_common_error_data_with_encoder_copy(inner_begin_id, inner_end_id):
+    #         t = pd.DataFrame(t)
+    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length))
+    #     datasets.append(None)
+
+    train_len = len(datasets[0]) * epoch_ratio if datasets[0] is not None else 100
+
+    from model.encoder_sample_model import EncoderSampleModel
+    from model.encoder_sample_model import create_parse_target_batch_data
+    from model.encoder_sample_model import create_loss_fn
+    from model.encoder_sample_model import create_output_ids_fn
+    from model.encoder_sample_model import expand_output_and_target_fn
+    from model.encoder_sample_model import create_multi_step_next_input_batch_fn
+    from model.encoder_sample_model import multi_step_print_output_records_fn
+    from experiment.experiment_dataset import load_addition_generate_iterate_solver_train_dataset_fn
+    return {
+        # 'name': 'graph_encoder_sample_config2',
+        'name': 'encoder_sample_config18',
+        # 'name': 'reinforcement_graph_encoder_sample_config2_fast_iterate',
+        # 'save_name': 'graph_encoder_sample_config2.pkl',
+        'save_name': 'encoder_sample_config18.pkl',
+        # 'save_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
+        # 'load_model_name': 'graph_encoder_sample_config2.pkl',
+        'load_model_name': 'encoder_sample_config18.pkl',
+        # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
+        # 'logger_file_path': 'graph_encoder_sample_config2.log',
+
+        'do_save_records_to_database': True,
+        'db_path': DATA_RECORDS_DEEPFIX_CODEFORCES_TRAIN_DBPATH,
+        'table_basename': 'encoder_sample_config18_21',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
+
+        'model_fn': EncoderSampleModel,
+        'model_dict':
+            {"start_label": begin_id,
+             "end_label": end_id,
+             "inner_start_label": inner_begin_id,
+             "inner_end_label": inner_end_id,
+             "vocabulary_size": vocabulary.vocabulary_size,
+             "embedding_size": 400,
+             "hidden_size": 400,
+             "max_sample_length": 1,
+             'graph_parameter': {"rnn_parameter": {'vocab_size': vocabulary.vocabulary_size,
+                                                   'max_len': max_length, 'input_size': 400,
+                                                   'input_dropout_p': 0.2, 'dropout_p': 0.2,
+                                                   'n_layers': 1, 'bidirectional': True, 'rnn_cell': 'gru',
+                                                   'variable_lengths': False, 'embedding': None,
+                                                   'update_embedding': True, },
+                                 "graph_type": "ggnn",
+                                 "graph_itr": 3,
+                                 "dropout_p": 0.2,
+                                 "mask_ast_node_in_rnn": False
+                                 },
+             'graph_embedding': 'mixed',
+             'pointer_type': 'query',
+             'rnn_type': 'gru',
+             "rnn_layer_number": 3,
+             "max_length": max_length,
+             'dropout_p': 0.2,
+             'pad_label': pad_id,
+             'vocabulary': vocabulary,
+             'mask_type': 'static',
+             'p2_type': 'step',
+             'p2_step_length': 2,
+             'feedforward_output': True,
+             },
+
+        'random_embedding': False,
+        'use_ast': use_ast,
+
+        'do_sample_evaluate': False,
+
+        'do_multi_step_sample_evaluate': do_multi_step_sample,
+        'max_step_times': 10,
+        'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id,
+                                                                                       vocabulary=vocabulary, use_ast=use_ast,
+                                                                                       p2_type='step'),
+        'compile_file_path': '/dev/shm/main.c',
+        'target_file_path': '/dev/shm/main.out',
+        'extract_includes_fn': lambda x: x['includes'],
+        'multi_step_sample_evaluator': [],
+        'print_output': True,
+        'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
+
+        'load_addition_generate_iterate_solver_train_dataset_fn':
+            load_addition_generate_iterate_solver_train_dataset_fn(vocabulary, transformer, do_flatten=True,
+                                                                   use_ast=use_ast, do_multi_step_sample=False),
+        'max_save_distance': 15,
+        'addition_train': False,
+        'addition_step': addition_step,
+        'no_addition_step': 10,
+
+        'vocabulary': vocabulary,
+        'parse_input_batch_data_fn': create_parse_input_batch_data_fn(use_ast=use_ast, p2_type='step', feedforward_output=True),
+        'parse_target_batch_data_fn': create_parse_target_batch_data(ignore_id, p2_type='step', feedforward_output=True),
+        'expand_output_and_target_fn': expand_output_and_target_fn(ignore_id),
+        'create_output_ids_fn': create_output_ids_fn(inner_end_id, p2_type='step'),
+        'train_loss': create_loss_fn(ignore_id),
+        'evaluate_object_list': [ErrorPositionAndValueAccuracy(ignore_token=ignore_id)],
+
+        'ac_copy_train': False,
+        'ac_copy_radio': 0.2,
+
+        'epcohes': epoches,
+        'start_epoch': 0,
+        'epoch_ratio': epoch_ratio,
+        'learning_rate': 6.25e-5,
+        'batch_size': batch_size,
+        'clip_norm': 1,
+        'optimizer': OpenAIAdam,
+        'optimizer_dict': {'schedule': 'warmup_linear', 'warmup': 0.002,
+                           't_total': epoch_ratio * epoches * train_len//batch_size, 'max_grad_norm': 10},
+        'data': datasets
+    }
+
+
+def encoder_sample_config19(is_debug):
+    vocabulary = create_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>'])
+    begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[0])
+    end_id = vocabulary.word_to_id(vocabulary.end_tokens[0])
+    inner_begin_id = vocabulary.word_to_id(vocabulary.begin_tokens[1])
+    inner_end_id = vocabulary.word_to_id(vocabulary.end_tokens[1])
+    pad_id = vocabulary.word_to_id(vocabulary.addition_tokens[0])
+    use_ast = False
+    if use_ast:
+        from experiment.experiment_dataset import load_graph_vocabulary
+        vocabulary = load_graph_vocabulary(vocabulary)
+    tokenize_fn = tokenize_by_clex_fn()
+    transformer = TransformVocabularyAndSLK(tokenize_fn=tokenize_fn, vocab=vocabulary)
+
+    batch_size = 16
+    epoches = 80
+    ignore_id = -1
+    max_length = 500
+    do_flatten = True
+    do_multi_step_sample = True
+    epoch_ratio = 0.4
+    addition_step = 3
+
+    from experiment.experiment_dataset import load_common_error_sample_iterative_dataset, \
+        load_deeffix_error_iterative_dataset_real_test
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer, do_flatten=do_flatten,
+    #                                                  use_ast=use_ast)
+    from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
+    # datasets = load_common_error_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample)
+
+    # if is_debug:
+    #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
+    #     from experiment.experiment_dataset import IterateErrorDataSet
+    #     datasets = []
+    #     for t in load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=do_flatten):
+    #         t = pd.DataFrame(t)
+    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length, do_flatten=do_flatten))
+    #     datasets.append(None)
+    # else:
+    #     from experiment.experiment_util import load_common_error_data_with_encoder_copy
+    #     from experiment.experiment_dataset import IterateErrorDataSet
+    #     datasets = []
+    #     for t in load_common_error_data_with_encoder_copy(inner_begin_id, inner_end_id):
+    #         t = pd.DataFrame(t)
+    #         datasets.append(IterateErrorDataSet(t, vocabulary, 'train', transformer, MAX_LENGTH=max_length))
+    #     datasets.append(None)
+
+    train_len = len(datasets[0]) * epoch_ratio if datasets[0] is not None else 100
+
+    from model.encoder_sample_model import EncoderSampleModel
+    from model.encoder_sample_model import create_parse_target_batch_data
+    from model.encoder_sample_model import create_loss_fn
+    from model.encoder_sample_model import create_output_ids_fn
+    from model.encoder_sample_model import expand_output_and_target_fn
+    from model.encoder_sample_model import create_multi_step_next_input_batch_fn
+    from model.encoder_sample_model import multi_step_print_output_records_fn
+    from experiment.experiment_dataset import load_addition_generate_iterate_solver_train_dataset_fn
+    return {
+        # 'name': 'graph_encoder_sample_config2',
+        'name': 'encoder_sample_config19',
+        # 'name': 'reinforcement_graph_encoder_sample_config2_fast_iterate',
+        # 'save_name': 'graph_encoder_sample_config2.pkl',
+        'save_name': 'encoder_sample_config19.pkl',
+        # 'save_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
+        # 'load_model_name': 'graph_encoder_sample_config2.pkl',
+        'load_model_name': 'encoder_sample_config19.pkl',
+        # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
+        # 'logger_file_path': 'graph_encoder_sample_config2.log',
+
+        'do_save_records_to_database': True,
+        'db_path': DATA_RECORDS_DEEPFIX_CODEFORCES_TRAIN_DBPATH,
+        'table_basename': 'encoder_sample_config19_24',
+        'change_output_records_to_batch_fn': change_output_records_to_batch,
+        'create_save_database_records_fn': create_save_database_records,
+
+        'model_fn': EncoderSampleModel,
+        'model_dict':
+            {"start_label": begin_id,
+             "end_label": end_id,
+             "inner_start_label": inner_begin_id,
+             "inner_end_label": inner_end_id,
+             "vocabulary_size": vocabulary.vocabulary_size,
+             "embedding_size": 400,
+             "hidden_size": 400,
+             "max_sample_length": 1,
+             'graph_parameter': {'vocab_size': vocabulary.vocabulary_size,
+                                                   'max_len': max_length, 'input_size': 400,
+                                                   'input_dropout_p': 0.2, 'dropout_p': 0.2,
+                                                   'n_layers': 3, 'bidirectional': True, 'rnn_cell': 'gru',
+                                                   'variable_lengths': False, 'embedding': None,
+                                                   'update_embedding': True, },
+             'graph_embedding': 'rnn',
+             'pointer_type': 'query',
+             'rnn_type': 'gru',
+             "rnn_layer_number": 3,
+             "max_length": max_length,
+             'dropout_p': 0.2,
+             'pad_label': pad_id,
+             'vocabulary': vocabulary,
+             'mask_type': 'static',
+             'p2_type': 'step',
+             'p2_step_length': 2,
+             'feedforward_output': True,
+             },
+
+        'random_embedding': False,
+        'use_ast': use_ast,
+
+        'do_sample_evaluate': False,
+
+        'do_multi_step_sample_evaluate': do_multi_step_sample,
+        'max_step_times': 10,
+        'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id,
+                                                                                       vocabulary=vocabulary, use_ast=use_ast,
+                                                                                       p2_type='step'),
+        'compile_file_path': '/dev/shm/main.c',
+        'target_file_path': '/dev/shm/main.out',
+        'extract_includes_fn': lambda x: x['includes'],
+        'multi_step_sample_evaluator': [],
+        'print_output': True,
+        'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
+
+        'load_addition_generate_iterate_solver_train_dataset_fn':
+            load_addition_generate_iterate_solver_train_dataset_fn(vocabulary, transformer, do_flatten=True,
+                                                                   use_ast=use_ast, do_multi_step_sample=False),
+        'max_save_distance': 15,
+        'addition_train': False,
+        'addition_step': addition_step,
+        'no_addition_step': 10,
+
+        'vocabulary': vocabulary,
+        'parse_input_batch_data_fn': create_parse_input_batch_data_fn(use_ast=use_ast, p2_type='step', feedforward_output=True),
+        'parse_target_batch_data_fn': create_parse_target_batch_data(ignore_id, p2_type='step', feedforward_output=True),
+        'expand_output_and_target_fn': expand_output_and_target_fn(ignore_id),
+        'create_output_ids_fn': create_output_ids_fn(inner_end_id, p2_type='step'),
+        'train_loss': create_loss_fn(ignore_id),
         'evaluate_object_list': [ErrorPositionAndValueAccuracy(ignore_token=ignore_id)],
 
         'ac_copy_train': False,
