@@ -1,4 +1,33 @@
-code level
+code level new(config11_25)
+<CODE> undeclared (first use in this function): 1652(1769) \ 3421
+expected <CODE> before <CODE> token: 372(1297) \ 1669
+expected <CODE> before <CODE>: 269(1061) \ 1330
+expected expression before <CODE> token: 259(774) \ 1033
+expected identifier or <CODE> before <CODE> token: 436(280) \ 716
+expected identifier or <CODE> before <CODE>: 435(205) \ 640
+expected declaration or statement at end of input: 247(324) \ 571
+expected expression before <CODE>: 130(103) \ 233
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 150(80) \ 230
+expected statement before <CODE> token: 91(136) \ 227
+
+error message level new(config11_25)
+<CODE> undeclared (first use in this function): 2612(2813) \ 5425
+expected <CODE> before <CODE> token: 466(1692) \ 2158
+expected <CODE> before <CODE>: 325(1184) \ 1509
+expected expression before <CODE> token: 338(977) \ 1315
+expected identifier or <CODE> before <CODE>: 781(121) \ 902
+expected identifier or <CODE> before <CODE> token: 933(-99) \ 834
+expected declaration or statement at end of input: 304(360) \ 664
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 319(68) \ 387
+expected expression before <CODE>: 144(132) \ 276
+<CODE> without a previous <CODE>: 170(99) \ 269
+expected statement before <CODE> token: 111(155) \ 266
+
+
+
+
+
+code level old(config11_23)
 <CODE> undeclared (first use in this function): 1672(1749) \ 3421
 expected <CODE> before <CODE> token: 371(1298) \ 1669
 expected <CODE> before <CODE>: 215(1115) \ 1330
@@ -10,7 +39,7 @@ expected expression before <CODE>: 177(56) \ 233
 expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 256(-26) \ 230
 expected statement before <CODE> token: 62(165) \ 227
 
-error message level
+error message level old(config11_23)
 <CODE> undeclared (first use in this function): 2632(2793) \ 5425
 expected <CODE> before <CODE> token: 474(1684) \ 2158
 expected <CODE> before <CODE>: 268(1241) \ 1509

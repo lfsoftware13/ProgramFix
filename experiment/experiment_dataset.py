@@ -158,6 +158,7 @@ class IterateErrorDataSet(CustomerDataSet):
             sample['input_seq_name'] = row['error_token_name_list'][1:-1]
             sample['input_length'] = len(sample['input_seq'])
         sample['copy_length'] = sample['input_length']
+        sample['last_input_seq_name'] = sample['input_seq_name']
 
         inner_begin_id = self.vocabulary.word_to_id(self.vocabulary.begin_tokens[1])
         inner_end_id = self.vocabulary.word_to_id(self.vocabulary.end_tokens[1])
@@ -215,6 +216,7 @@ class IterateErrorDataSet(CustomerDataSet):
                 sample['adj'] = 0
         else:
             sample['copy_length'] = sample['input_length']
+            sample['error_count'] = row['distance']
             sample['adj'] = 0
 
         if self.use_ast:
@@ -754,12 +756,16 @@ def load_graph_vocabulary(vocabulary):
 
 
 def load_deeffix_error_iterative_dataset_real_test(vocabulary, mask_transformer, do_flatten=False, use_ast=False,
-                                                   do_multi_step_sample=True, customer_df=None):
+                                                   do_multi_step_sample=True, customer_df=None,
+                                                   sample_count=None, sample_seed=10):
     if customer_df is not None:
         data_dict = load_customer_code_data_for_iterate(customer_df)
     else:
         data_dict = load_deepfix_error_data_for_iterate()
-    test_dataset = IterateErrorDataSet(pd.DataFrame(data_dict), vocabulary, 'deepfix',
+    df = pd.DataFrame(data_dict)
+    if sample_count is not None:
+        df = df.sample(n=sample_count, random_state=sample_seed)
+    test_dataset = IterateErrorDataSet(df, vocabulary, 'deepfix',
                                    transformer_vocab_slk=mask_transformer, do_flatten=do_flatten, use_ast=use_ast,
                                        do_multi_step_sample=do_multi_step_sample)
     info_output = "There are {} parsed data in the deepfix dataset".format(len(test_dataset))

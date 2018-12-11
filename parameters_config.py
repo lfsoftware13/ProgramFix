@@ -78,6 +78,7 @@ def test_config1(is_debug):
         'create_multi_step_next_input_batch_fn': None,
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': False,
@@ -190,6 +191,7 @@ def pointer_network_with_ggnn_encoder(is_debug):
         'create_multi_step_next_input_batch_fn': None,
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': False,
@@ -419,6 +421,7 @@ def encoder_sample_config1(is_debug):
                                                                                        vocabulary=vocabulary),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -576,6 +579,7 @@ def encoder_sample_config2(is_debug):
                                                                                        vocabulary=vocabulary, use_ast=use_ast),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -719,6 +723,7 @@ def encoder_sample_config3(is_debug):
                                                                                        vocabulary=vocabulary, use_ast=use_ast),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -888,6 +893,7 @@ def encoder_sample_config4(is_debug):
                                                                                        p2_type='step'),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -1052,6 +1058,7 @@ def encoder_sample_config6(is_debug):
                                                                                        p2_type='step'),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -1216,6 +1223,7 @@ def encoder_sample_config7(is_debug):
                                                                                        p2_type='step'),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -1385,6 +1393,7 @@ def encoder_sample_config5(is_debug):
                                                                                        p2_type='static', only_sample=True),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -1555,6 +1564,7 @@ def encoder_sample_config8(is_debug):
                                                                                        p2_type='step', only_sample=only_sample),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -1720,6 +1730,7 @@ def encoder_sample_config9(is_debug):
                                                                                        p2_type='step', only_sample=only_sample),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -1885,6 +1896,7 @@ def encoder_sample_config10(is_debug):
                                                                                        p2_type='step', only_sample=only_sample),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': False,
@@ -1944,8 +1956,10 @@ def encoder_sample_config11(is_debug):
     max_length = 500
     do_flatten = True
     do_multi_step_sample = True
+    error_stop_type = 'normal'
     epoch_ratio = 1.0
     addition_step = 3
+    sample_count = 1008
 
 #     code = r'''
 #     #include<stdio.h>
@@ -1991,16 +2005,16 @@ return 0 ;
     #                                                  mask_transformer=transformer, do_flatten=do_flatten,
     #                                                  use_ast=use_ast)
     # from experiment.experiment_dataset import load_deepfix_flatten_combine_node_sample_iterative_dataset
-    datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
-                                                     mask_transformer=transformer,
-                                                     do_flatten=do_flatten, use_ast=use_ast,
-                                                     do_multi_step_sample=do_multi_step_sample,
-                                                     merge_action=False)
-    # datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
-    #                                                           mask_transformer=transformer, do_flatten=do_flatten,
-    #                                                           use_ast=use_ast,
-    #                                                           do_multi_step_sample=do_multi_step_sample,
-    #                                                           customer_df=df)
+    # datasets = load_deepfix_sample_iterative_dataset(is_debug=is_debug, vocabulary=vocabulary,
+    #                                                  mask_transformer=transformer,
+    #                                                  do_flatten=do_flatten, use_ast=use_ast,
+    #                                                  do_multi_step_sample=do_multi_step_sample,
+    #                                                  merge_action=False)
+    datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
+                                                              mask_transformer=transformer, do_flatten=do_flatten,
+                                                              use_ast=use_ast,
+                                                              do_multi_step_sample=do_multi_step_sample,
+                                                              customer_df=None, sample_count=None)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2041,9 +2055,9 @@ return 0 ;
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': False,
+        'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config11_23_one_step',
+        'table_basename': 'encoder_sample_config11_25',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2088,12 +2102,14 @@ return 0 ;
         'do_sample_evaluate': False,
 
         'do_multi_step_sample_evaluate': do_multi_step_sample,
+        'error_stop_type': error_stop_type,
         'max_step_times': 10,
         'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id,
                                                                                        vocabulary=vocabulary, use_ast=use_ast,
                                                                                        p2_type='step'),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -2119,7 +2135,7 @@ return 0 ;
         'ac_copy_radio': 0.2,
 
         'epcohes': epoches,
-        'start_epoch': 0,
+        'start_epoch': 24,
         'epoch_ratio': epoch_ratio,
         'learning_rate': 6.25e-5,
         'batch_size': batch_size,
@@ -2155,6 +2171,7 @@ def encoder_sample_config12(is_debug):
     do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
+    sample_count = 1008
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -2170,7 +2187,8 @@ def encoder_sample_config12(is_debug):
     datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
                                                               mask_transformer=transformer, do_flatten=do_flatten,
                                                               use_ast=use_ast,
-                                                              do_multi_step_sample=do_multi_step_sample)
+                                                              do_multi_step_sample=do_multi_step_sample,
+                                                              sample_count=None)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2213,7 +2231,7 @@ def encoder_sample_config12(is_debug):
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config12_only_gru_with_token_action_21',
+        'table_basename': 'encoder_sample_config12_only_gru_with_token_action_27',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2259,6 +2277,7 @@ def encoder_sample_config12(is_debug):
                                                                                        p2_type='step'),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -2322,6 +2341,7 @@ def encoder_sample_config13(is_debug):
     do_multi_step_sample = True
     epoch_ratio = 1.0
     addition_step = 3
+    sample_count = 1008
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -2337,7 +2357,8 @@ def encoder_sample_config13(is_debug):
     datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
                                                               mask_transformer=transformer, do_flatten=do_flatten,
                                                               use_ast=use_ast,
-                                                              do_multi_step_sample=do_multi_step_sample)
+                                                              do_multi_step_sample=do_multi_step_sample,
+                                                              sample_count=None)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2380,7 +2401,7 @@ def encoder_sample_config13(is_debug):
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_22',
+        'table_basename': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_21',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2424,6 +2445,7 @@ def encoder_sample_config13(is_debug):
                                                                                        p2_type='step'),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -2486,6 +2508,7 @@ def encoder_sample_config14(is_debug):
     epoch_ratio = 1.0
     addition_step = 3
     only_sample = True
+    sample_count = 1008
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -2501,7 +2524,8 @@ def encoder_sample_config14(is_debug):
     datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
                                                               mask_transformer=transformer, do_flatten=do_flatten,
                                                               use_ast=use_ast,
-                                                              do_multi_step_sample=do_multi_step_sample)
+                                                              do_multi_step_sample=do_multi_step_sample,
+                                                              sample_count=None)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2595,6 +2619,7 @@ def encoder_sample_config14(is_debug):
                                                                                        p2_type='step', only_sample=only_sample),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -2657,6 +2682,7 @@ def encoder_sample_config15(is_debug):
     epoch_ratio = 1.0
     addition_step = 3
     sequence_output = True
+    sample_count = 1008
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -2672,7 +2698,8 @@ def encoder_sample_config15(is_debug):
     datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
                                                               mask_transformer=transformer, do_flatten=do_flatten,
                                                               use_ast=use_ast,
-                                                              do_multi_step_sample=do_multi_step_sample)
+                                                              do_multi_step_sample=do_multi_step_sample,
+                                                              sample_count=sample_count)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2713,7 +2740,7 @@ def encoder_sample_config15(is_debug):
         # 'load_model_name': 'rl_solver_graph_encoder_sample_config2_fast_iterate.pkl',
         # 'logger_file_path': 'graph_encoder_sample_config2.log',
 
-        'do_save_records_to_database': True,
+        'do_save_records_to_database': False,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
         'table_basename': 'encoder_sample_config15_sequence_output_63',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
@@ -2763,9 +2790,10 @@ def encoder_sample_config15(is_debug):
                                                                                        vocabulary=vocabulary, use_ast=use_ast),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
-        'print_output': True,
+        'print_output': False,
         'print_output_fn': multi_step_print_output_records_fn(inner_end_id),
 
         'load_addition_generate_iterate_solver_train_dataset_fn':
@@ -2825,6 +2853,7 @@ def encoder_sample_config16(is_debug):
     epoch_ratio = 1.0
     addition_step = 3
     only_sample = True
+    sample_count = 1008
 
     from experiment.experiment_dataset import load_deepfix_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -2840,7 +2869,8 @@ def encoder_sample_config16(is_debug):
     datasets = load_deeffix_error_iterative_dataset_real_test(vocabulary=vocabulary,
                                                               mask_transformer=transformer, do_flatten=do_flatten,
                                                               use_ast=use_ast,
-                                                              do_multi_step_sample=do_multi_step_sample)
+                                                              do_multi_step_sample=do_multi_step_sample,
+                                                              sample_count=None)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -2883,7 +2913,7 @@ def encoder_sample_config16(is_debug):
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_DBPATH,
-        'table_basename': 'encoder_sample_config16_only_gru_with_token_action_only_sample_14',
+        'table_basename': 'encoder_sample_config16_only_gru_with_token_action_only_sample_12',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -2929,6 +2959,7 @@ def encoder_sample_config16(is_debug):
                                                                                        p2_type='step', only_sample=only_sample),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -3095,6 +3126,7 @@ def encoder_sample_config17(is_debug):
                                                                                        p2_type='step', only_sample=only_sample),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': False,
@@ -3342,6 +3374,7 @@ def encoder_sample_data_generate1(is_debug):
                                                                                        vocabulary=vocabulary),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -3606,6 +3639,7 @@ def encoder_sample_data_generate2(is_debug):
                                                                                        vocabulary=vocabulary, use_ast=use_ast),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': False,
@@ -3705,6 +3739,7 @@ def sensibility_rnn_config1(is_debug):
         'max_step_times': 10,
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': False,
@@ -3835,6 +3870,7 @@ def sensibility_rnn_config2(is_debug):
                                                                                        one_step=True),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': False,
@@ -3894,8 +3930,10 @@ def encoder_sample_config18(is_debug):
     max_length = 500
     do_flatten = True
     do_multi_step_sample = True
+    error_stop_type = 'normal'
     epoch_ratio = 0.4
     addition_step = 3
+    sample_count = 1008
 
     from experiment.experiment_dataset import load_common_error_sample_iterative_dataset, \
         load_deeffix_error_iterative_dataset_real_test
@@ -3912,7 +3950,7 @@ def encoder_sample_config18(is_debug):
                                                               mask_transformer=transformer, do_flatten=do_flatten,
                                                               use_ast=use_ast,
                                                               do_multi_step_sample=do_multi_step_sample,
-                                                              customer_df=None)
+                                                              customer_df=None, sample_count=None)
 
     # if is_debug:
     #     from experiment.experiment_util import load_fake_deepfix_dataset_iterate_error_data, load_fake_deepfix_dataset_iterate_error_data_sample_100
@@ -3955,7 +3993,7 @@ def encoder_sample_config18(is_debug):
 
         'do_save_records_to_database': True,
         'db_path': DATA_RECORDS_DEEPFIX_CODEFORCES_TRAIN_DBPATH,
-        'table_basename': 'encoder_sample_config18_21',
+        'table_basename': 'encoder_sample_config18_24',
         'change_output_records_to_batch_fn': change_output_records_to_batch,
         'create_save_database_records_fn': create_save_database_records,
 
@@ -4000,12 +4038,14 @@ def encoder_sample_config18(is_debug):
         'do_sample_evaluate': False,
 
         'do_multi_step_sample_evaluate': do_multi_step_sample,
+        'error_stop_type': error_stop_type,
         'max_step_times': 10,
         'create_multi_step_next_input_batch_fn': create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id,
                                                                                        vocabulary=vocabulary, use_ast=use_ast,
                                                                                        p2_type='step'),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,
@@ -4171,6 +4211,7 @@ def encoder_sample_config19(is_debug):
                                                                                        p2_type='step'),
         'compile_file_path': '/dev/shm/main.c',
         'target_file_path': '/dev/shm/main.out',
+        'log_file_path': '/dev/shm/main.log',
         'extract_includes_fn': lambda x: x['includes'],
         'multi_step_sample_evaluator': [],
         'print_output': True,

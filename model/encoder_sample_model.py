@@ -875,6 +875,7 @@ def create_multi_step_next_input_batch_fn(begin_id, end_id, inner_end_id, vocabu
         input_data['input_seq'] = next_input
         input_data['input_length'] = next_input_len
         input_data['copy_length'] = next_input_len
+        input_data['last_input_seq_name'] = input_data['input_seq_name']
         input_data['input_seq_name'] = final_output_name_list
 
         if use_ast:

@@ -188,9 +188,11 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
              do_sample=False, print_output=False, create_output_ids_fn=None, evaluate_obj_list=[],
              expand_output_and_target_fn=None, max_step_times=0, vocabulary=None, file_path='',
                         create_multi_step_next_input_batch_fn=None, extract_includes_fn=lambda x: x['includes'],
-                        print_output_fn=None, do_beam_search=False, target_file_path='main.out', do_save_data=False,
+                        print_output_fn=None, do_beam_search=False, target_file_path='main.out', log_file_path='main.log',
+                        do_save_data=False,
                         max_save_distance=None, save_records_to_database=False,
-                        db_path='', table_name='', change_output_records_to_batch_fn=None, create_save_database_records_fn=None):
+                        db_path='', table_name='', change_output_records_to_batch_fn=None, create_save_database_records_fn=None,
+                        error_stop_type='normal'):
     total_loss = to_cuda(torch.Tensor([0]))
     total_batch = to_cuda(torch.Tensor([0]))
     steps = 0
@@ -221,6 +223,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                 result_list = [False for _ in range(batch_size)]
                 result_records_list = []
                 sample_steps = [-1 for _ in range(batch_size)]
+                error_count_list = batch_data['error_count']
 
                 for i in range(max_step_times):
                     model_input = parse_input_batch_data_fn(input_data, do_sample=True)
@@ -235,11 +238,26 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                     final_output_list += [final_output]
                     output_records_list += [output_records]
 
-                    continue_list, result_list = compile_code_ids_list(final_output_name_list, continue_list, result_list, vocabulary=vocabulary,
-                                                          includes_list=extract_includes_fn(input_data), file_path=file_path,
-                                                                       target_file_path=target_file_path, do_compile_pool=True,
-                                                                       need_transform=False)
-                    sample_steps = [i+1 if s == -1 and not c else s for s, c in zip(sample_steps, continue_list)]
+                    continue_list, result_list, cur_error_count_list = compile_code_ids_list(final_output_name_list, continue_list, result_list, vocabulary=vocabulary,
+                                                                       includes_list=extract_includes_fn(input_data), file_path=file_path,
+                                                                       target_file_path=target_file_path, log_file_path=log_file_path,
+                                                                       do_compile_pool=True, need_transform=False)
+
+                    if error_stop_type == 'oracle':
+                        reject_list = [True if c and n > o else False
+                                              for c, o, n in zip(continue_list, error_count_list, cur_error_count_list)]
+                    elif error_stop_type == 'normal':
+                        reject_list = [False for _ in range(batch_size)]
+                    error_count_list = [n if n < o and n >= 0 else o for o, n in
+                                        zip(error_count_list, cur_error_count_list)]
+                    for i_f, rej in enumerate(reject_list):
+                        if rej:
+                            # use last output
+                            final_output_name_list[i_f] = input_data['last_input_seq_name'][i_f]
+                            continue_list[i_f] = False
+
+                    sample_steps = [i+1 if s == -1 and not c and not r else s for s, c, r in zip(sample_steps, continue_list, reject_list)]
+                    sample_steps = [i if s == -1 and not c and r else s for s, c, r in zip(sample_steps, continue_list, reject_list)]
 
                     result_records_list += [result_list]
                     if sum(continue_list) == 0:
@@ -424,7 +442,8 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                        load_addition_generate_iterate_solver_train_dataset_fn=None,
                        max_save_distance=None, addition_step=1, no_addition_step=5,
                        do_save_records_to_database=False, change_output_records_to_batch_fn=None,
-                       create_save_database_records_fn=None, just_evaluate=False):
+                       create_save_database_records_fn=None, just_evaluate=False, log_file_path='main.log',
+                       error_stop_type='normal'):
     valid_loss = 0
     test_loss = 0
     valid_accuracy = 0
@@ -525,11 +544,13 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                                              print_output_fn=print_output_fn,
                                                                              do_beam_search=do_beam_search,
                                                                              target_file_path=target_file_path,
+                                                                                log_file_path=log_file_path,
                                                                                 do_save_data=False,
                                                                                 save_records_to_database=do_save_records_to_database,
                                                                                 db_path=db_path, table_name=table_basename,
                                                                                 change_output_records_to_batch_fn=change_output_records_to_batch_fn,
-                                                                                create_save_database_records_fn=create_save_database_records_fn)
+                                                                                create_save_database_records_fn=create_save_database_records_fn,
+                                                                                error_stop_type=error_stop_type)
             print('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             info('previous sample test loss: {}, evaluator : '.format(sample_test_loss))
             for evaluator in multi_step_test_evalutor:
@@ -591,8 +612,10 @@ def train_and_evaluate(model, batch_size, train_dataset, valid_dataset, test_dat
                                                                                 print_output_fn=print_output_fn,
                                                                                 do_beam_search=do_beam_search,
                                                                                 target_file_path=target_file_path,
+                                                                                log_file_path=log_file_path,
                                                                                 do_save_data=True,
-                                                                                max_save_distance=max_save_distance)
+                                                                                max_save_distance=max_save_distance,
+                                                                                error_stop_type=error_stop_type)
             print('addition train sample test loss: {}, evaluator : '.format(sample_test_loss))
             info('addition train sample test loss: {}, evaluator : '.format(sample_test_loss))
             for evaluator in multi_step_test_evalutor:
@@ -680,14 +703,22 @@ if __name__ == '__main__':
     parser.add_argument("--parallel", type=boolean_string)
     parser.add_argument("--just_evaluate", type=boolean_string, default=False)
     parser.add_argument("--output_log", type=str, default=None)
+    parser.add_argument("--load_model_name", type=str, default=None)
+    parser.add_argument("--save_model_name", type=str, default=None)
     args = parser.parse_args()
     load_previous = args.load_previous
     problem_util.GPU_INDEX = args.gpu
     problem_util.Parallel = args.parallel
     is_debug = args.debug
     just_evaluate = args.just_evaluate
+    cmd_load_model_name = args.load_model_name
+    cmd_save_model_name = args.save_model_name
 
     p_config = parameters_config.__dict__.get(args.config_name)(is_debug)
+    if cmd_load_model_name is not None:
+        p_config['load_model_name'] = cmd_load_model_name
+    if cmd_save_model_name is not None:
+        p_config['save_model_name'] = cmd_save_model_name
     epoches = p_config.get("epcohes", 20)
     learning_rate = p_config.get("learning_rate", 20)
     batch_size = p_config.get("batch_size", 32)
@@ -725,10 +756,13 @@ if __name__ == '__main__':
     addition_train = p_config.get('addition_train', False)
 
     do_multi_step_sample_evaluate = p_config['do_multi_step_sample_evaluate']
+    error_stop_type = p_config.get('error_stop_type', 'normal')
     max_step_times = p_config['max_step_times']
     create_multi_step_next_input_batch_fn = p_config['create_multi_step_next_input_batch_fn']
     compile_file_path = p_config['compile_file_path']
     target_file_path = p_config['target_file_path']
+    log_file_path = p_config['log_file_path']
+
     extract_includes_fn = p_config['extract_includes_fn']
     print_output = p_config['print_output']
     print_output_fn = p_config['print_output_fn']
@@ -788,6 +822,8 @@ if __name__ == '__main__':
                        change_output_records_to_batch_fn=change_output_records_to_batch_fn,
                        create_save_database_records_fn=create_save_database_records_fn,
                        just_evaluate=just_evaluate,
+                       log_file_path=log_file_path,
+                       error_stop_type=error_stop_type,
                        )
 
     # test_loss, train_test_loss = evaluate(model, test_data, batch_size, evaluate_object_list,

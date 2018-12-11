@@ -220,7 +220,7 @@ def multi_step_evaluate(model, dataset, batch_size, parse_input_batch_data_fn, p
                     final_output_list += [final_output]
                     output_records_list += [output_records]
 
-                    continue_list, result_list = compile_code_ids_list(final_output_name_list, continue_list, result_list, vocabulary=vocabulary,
+                    continue_list, result_list, _ = compile_code_ids_list(final_output_name_list, continue_list, result_list, vocabulary=vocabulary,
                                                           includes_list=extract_includes_fn(input_data), file_path=file_path,
                                                                        target_file_path=target_file_path, do_compile_pool=True,
                                                                        need_transform=False)

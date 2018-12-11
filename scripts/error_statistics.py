@@ -54,6 +54,12 @@ def calculate_error_msg_count(db_path, table_name, key):
 
 
 def calculate_error_type_main2(db_path, table_name):
+    '''
+    code level error type statistics
+    :param db_path:
+    :param table_name:
+    :return:
+    '''
     after_top_dict = calculate_top_error_type(db_path, table_name, 'errors')
     top_dict = calculate_top_error_type(db_path, table_name, 'original_errors')
 
@@ -96,6 +102,6 @@ def calculate_error_type_main(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config11_23'
-    # calculate_error_type_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
-    calculate_error_type_main2(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
+    table_name = 'encoder_sample_config11_25'
+    calculate_error_type_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
+    # calculate_error_type_main2(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

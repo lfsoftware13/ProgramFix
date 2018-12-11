@@ -1077,8 +1077,12 @@ def compile_c_code_by_gcc_one_arg(one):
     return compile_c_code_by_gcc(*one)
 
 
+def compile_and_read_error_info_one_arg(one):
+    return compile_and_read_error_info(*one)
+
+
 def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, includes_list, file_path='',
-                          target_file_path='main.out', do_compile_pool=True, need_transform=True):
+                          target_file_path='main.out', log_file_path='main.log', do_compile_pool=True, need_transform=True):
     compile_pool = get_compile_pool()
     batch_size = len(final_output)
     cur_continue = [True for _ in range(batch_size)]
@@ -1099,22 +1103,26 @@ def compile_code_ids_list(final_output, continue_list, result_list, vocabulary, 
         code = ' '.join(code_list)
         for inc in includes:
             code = inc + '\n' + code
-        compile_args_list += [(code, file_path, target_file_path)]
+        compile_args_list += [(code, file_path, target_file_path, log_file_path)]
         code_index_dict += [count_i]
         count_i += 1
     if do_compile_pool:
-        part_res_list = list(compile_pool.starmap(compile_c_code_by_gcc, compile_args_list))
+        # part_res_list = list(compile_pool.starmap(compile_c_code_by_gcc, compile_args_list))
+        part_res_list = list(compile_pool.starmap(compile_and_read_error_info, compile_args_list))
     else:
-        part_res_list = map(compile_c_code_by_gcc_one_arg, compile_args_list)
+        # part_res_list = map(compile_c_code_by_gcc_one_arg, compile_args_list)
+        part_res_list = map(compile_and_read_error_info_one_arg, compile_args_list)
 
-
-
-    for i, res in enumerate(part_res_list):
+    error_count_list = [-1 for _ in range(batch_size)]
+    for i, (res, msg) in enumerate(part_res_list):
+        error_list = extract_error_message(msg)
         act_i = code_index_dict[i]
         cur_result_list[act_i] = res
         c = not res
         cur_continue[act_i] = c
-    return cur_continue, cur_result_list
+        error_count_list[act_i] = len(error_list)
+
+    return cur_continue, cur_result_list, error_count_list
 
 
 if __name__ == '__main__':
@@ -1182,7 +1190,7 @@ def save_addition_data(original_states, states, tokenize_fn, batch_size, file_pa
         last_res_list = [False for _ in range(len(compile_list))]
         include_list = original_states['includes'] + original_states['includes']
 
-        _, compile_res_list = compile_code_ids_list(compile_list, continue_list, last_res_list,
+        _, compile_res_list, _ = compile_code_ids_list(compile_list, continue_list, last_res_list,
                                                     vocabulary=vocabulary,
                                                     includes_list=include_list, file_path=file_path,
                                                     target_file_path=target_file_path, do_compile_pool=True,
@@ -1266,3 +1274,33 @@ def create_special_tokens_ids(keyword_vocab, has_delimiter=False):
 def create_special_token_mask_list(total_ids, vocabulary_size):
     mask = [1 if i in total_ids else 0 for i in range(vocabulary_size)]
     return mask
+
+
+def compile_and_read_error_info(code, file_path='/dev/shm/main.c', target_file_path='/dev/shm/main.out',
+                                log_file_path='/dev/shm/main.log'):
+    # file_path = '/dev/shm/main.c'
+    # target_file_path = '/dev/shm/main.out'
+    # log_file_path = '/dev/shm/main.log'
+    res = compile_c_code_by_gcc(code, file_path=file_path, target_file_path=target_file_path,
+                                log_file_path=log_file_path, add_pid=True)
+    pid_log_file_path = add_pid_to_file_path(log_file_path)
+    with open(pid_log_file_path, encoding='utf-8') as f:
+        texts = f.read()
+        texts = texts.replace(u"\u2018", "'").replace(u"\u2019", "'")
+    return res, texts
+
+
+def extract_error_lines(l):
+    pattern = re.compile(r"^(.+\.c:)?\d+:\d+: error: (.*)$")
+    match = pattern.search(l)
+    if match:
+        message = match.group(2)
+        return message
+    return None
+
+
+def extract_error_message(info):
+    info_lines = info.split('\n')
+    info_res = [extract_error_lines(l) for l in info_lines]
+    error_l = list(filter(lambda x: x is not None, info_res))
+    return error_l

@@ -1,25 +1,8 @@
-import itertools
 import json
-import re
 
 from common.args_util import get_compile_pool
-from common.constants import DATA_RECORDS_DEEPFIX
-from common.util import compile_c_code_by_gcc, add_pid_to_file_path
-from database.database_util import run_sql_statment
+from common.util import compile_and_read_error_info, extract_error_message
 from scripts.scripts_util import read_experiment_result_df, read_deepfix_error_records, save_compile_result
-
-
-def compile_and_read_error_info(code):
-    file_path = '/dev/shm/main.c'
-    target_file_path = '/dev/shm/main.out'
-    log_file_path = '/dev/shm/main.log'
-    res = compile_c_code_by_gcc(code, file_path=file_path, target_file_path=target_file_path,
-                                log_file_path=log_file_path, add_pid=True)
-    pid_log_file_path = add_pid_to_file_path(log_file_path)
-    with open(pid_log_file_path, encoding='utf-8') as f:
-        texts = f.read()
-        texts = texts.replace(u"\u2018", "'").replace(u"\u2019", "'")
-    return res, texts
 
 
 def consist_full_code(one, code_key):
@@ -34,22 +17,6 @@ def create_compile_info_save_records(ids, compile_info_list, error_list):
     for i, info, errors in zip(ids, compile_info_list, error_list):
         save_records += [(info, json.dumps(errors), len(errors), i)]
     return save_records
-
-
-def extract_error_lines(l):
-    pattern = re.compile(r"^(.+\.c:)?\d+:\d+: error: (.*)$")
-    match = pattern.search(l)
-    if match:
-        message = match.group(2)
-        return message
-    return None
-
-
-def extract_error_message(info):
-    info_lines = info.split('\n')
-    info_res = [extract_error_lines(l) for l in info_lines]
-    error_l = list(filter(lambda x: x is not None, info_res))
-    return error_l
 
 
 def pool_compile_and_save(full_original_code):
@@ -99,7 +66,11 @@ def check_error_count_main(db_path, table_name):
 
 
 if __name__ == '__main__':
-    from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config4_20'
-    main_compile_code_and_read_error_info(DATA_RECORDS_DEEPFIX_DBPATH, table_name, do_compile_original=True)
+    # from config import DATA_RECORDS_DEEPFIX_DBPATH
+    # table_name = 'encoder_sample_config4_20'
+    # main_compile_code_and_read_error_info(DATA_RECORDS_DEEPFIX_DBPATH, table_name, do_compile_original=True)
     # check_error_count_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
+    text = r''''''
+    infos = extract_error_message(text)
+    print(len(infos))
+    print(infos)

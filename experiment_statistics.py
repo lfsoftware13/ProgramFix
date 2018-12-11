@@ -170,65 +170,61 @@ config10 = {
 
 config11 = {
     'result': '''
-    correct_count: 3974/6975.0, correct: 0.5697491039426523
-    part_correct_count: 947/6975.0, part_correct: 0.13577060931899643
-    model_total_error: 11119, original_total_error: 16766.0, resolved: 0.3368125969223429
-    ''',
+    correct_count: 4054/6975.0, correct: 0.5812186379928316
+    part_correct_count: 1001/6975.0, part_correct: 0.14351254480286738
+    model_total_error: 8602, original_total_error: 16766.0, resolved: 0.48693785041154714''',
     'config_name': 'encoder_sample_config11',
     'encoder_type': 'mixed',
     'output_type': 'token_action',
     'only_sample': False,
     'decoder_type': 'ffn',
-    'best_model': 'encoder_sample_config11.pkl23',
-    'run_result': 0.578962703962704,
-    'real_result': 0.5697491039426523,
-    'table_name': 'encoder_sample_config11_23',
+    'best_model': 'encoder_sample_config11.pkl25',
+    'run_result': 0.5901878002620469,
+    'real_result': 0.5812186379928316,
+    'table_name': 'encoder_sample_config11_25',
 
 
     'one_step_result': '''
-    correct_count: 2163/6975.0, correct: 0.31010752688172044
-    part_correct_count: 1880/6975.0, part_correct: 0.26953405017921145
-    model_total_error: 12170, original_total_error: 16766.0, resolved: 0.2741262078015031
-    ''',
-    'one_step_run_result': 0.3151223776223776,
-    'one_step_real_result': 0.31010752688172044,
+    correct_count: 2164/6975.0, correct: 0.3102508960573477
+    part_correct_count: 1866/6975.0, part_correct: 0.2675268817204301
+    model_total_error: 11922, original_total_error: 16766.0, resolved: 0.28891804843134916''',
+    'one_step_run_result': 0.3150385791235988,
+    'one_step_real_result': 0.3102508960573477,
 
 }
 
 
 config12 = {
     'result': '''
-    correct_count: 2548/6975.0, correct: 0.3653046594982079
-    part_correct_count: 1129/6975.0, part_correct: 0.16186379928315411
-    model_total_error: 12628, original_total_error: 16766.0, resolved: 0.2468090182512227
-    ''',
+    correct_count: 2549/6975.0, correct: 0.36544802867383513
+    part_correct_count: 1109/6975.0, part_correct: 0.15899641577060933
+    model_total_error: 12844, original_total_error: 16766.0, resolved: 0.23392580221877612''',
     'config_name': 'encoder_sample_config12',
     'encoder_type': 'rnn',
     'output_type': 'token_action',
     'only_sample': False,
     'decoder_type': 'ffn',
-    'best_model': 'encoder_sample_config12_only_gru_with_token_action.pkl21',
-    'run_result': 0.37056428155904597,
-    'real_result': 0.3653046594982079,
-    'table_name': 'encoder_sample_config12_only_gru_with_token_action_21',
+    'best_model': 'encoder_sample_config12_only_gru_with_token_action.pkl27',
+    'run_result': 0.37108749454069007,
+    'real_result': 0.36544802867383513,
+    'table_name': 'encoder_sample_config12_only_gru_with_token_action_27',
 }
 
 
 config13 = {
     'result': '''
-    correct_count: 2092/6975.0, correct: 0.2999283154121864
-    part_correct_count: 724/6975.0, part_correct: 0.10379928315412186
-    model_total_error: 21516, original_total_error: 16766.0, resolved: -0.2833114636764882
-    ''',
+    correct_count: 2101/6975.0, correct: 0.30121863799283155
+    part_correct_count: 648/6975.0, part_correct: 0.09290322580645162
+    model_total_error: 22647, original_total_error: 16766.0, resolved: -0.35076941429082664''',
     'config_name': 'encoder_sample_config13',
     'encoder_type': 'ggnn',
     'output_type': 'token_action',
     'only_sample': False,
     'decoder_type': 'ffn',
-    'best_model': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link.pkl22',
-    'run_result': 0.30495626822157434,
-    'real_result': 0.2999283154121864,
-    'table_name': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_22',
+    'best_model': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link.pkl21',
+    'run_result': 0.3058669384189838,
+    'real_result': 0.30121863799283155,
+    'table_name': 'encoder_sample_config13_only_ggnn_with_token_action_with_sequence_link_21',
 }
 
 
@@ -270,18 +266,17 @@ config15 = {
 config16 = {
     'result': '''
     correct_count: 2561/6975.0, correct: 0.367168458781362
-    part_correct_count: 1071/6975.0, part_correct: 0.15354838709677418
-    model_total_error: 12500, original_total_error: 16766.0, resolved: 0.25444351664082066
-    ''',
+    part_correct_count: 995/6975.0, part_correct: 0.14265232974910394
+    model_total_error: 13328, original_total_error: 16766.0, resolved: 0.2050578551831087''',
     'config_name': 'encoder_sample_config16',
     'encoder_type': 'rnn',
     'output_type': 'token_action',
     'only_sample': True,
     'decoder_type': 'fnn',
-    'best_model': 'encoder_sample_config16_only_gru_with_token_action_only_sample_14.pkl14',
-    'run_result': 0.3731060606060606,
+    'best_model': 'encoder_sample_config16_only_gru_with_token_action_only_sample.pkl12',
+    'run_result': 0.3728344737225215,
     'real_result': 0.367168458781362,
-    'table_name': 'encoder_sample_config16_only_gru_with_token_action_only_sample_14',
+    'table_name': 'encoder_sample_config16_only_gru_with_token_action_only_sample_12',
 }
 
 
@@ -301,19 +296,19 @@ sensibility_config_2 = {
 
 config18 = {
     'result': '''
-    correct_count: 2984/6975.0, correct: 0.4278136200716846
-    part_correct_count: 922/6975.0, part_correct: 0.13218637992831542
-    model_total_error: 13208, original_total_error: 16766.0, resolved: 0.21221519742335682''',
+    correct_count: 3090/6975.0, correct: 0.443010752688172
+    part_correct_count: 804/6975.0, part_correct: 0.11526881720430107
+    model_total_error: 14652, original_total_error: 16766.0, resolved: 0.1260885124657044''',
     'config_name': 'encoder_sample_config18',
     'dataset': 'codeforces',
     'encoder_type': 'mixed',
     'output_type': 'token_action',
     'only_sample': False,
     'decoder_type': 'ffn',
-    'best_model': 'encoder_sample_config18.pkl26',
-    'run_result': 0.4344154898820789,
-    'real_result': 0.4278136200716846,
-    'table_name': 'encoder_sample_config18_26',
+    'best_model': 'encoder_sample_config18.pkl24',
+    'run_result': 0.44984713932158976,
+    'real_result': 0.443010752688172,
+    'table_name': 'encoder_sample_config18_24',
 
 }
 
