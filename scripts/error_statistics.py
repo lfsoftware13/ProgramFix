@@ -102,6 +102,9 @@ def calculate_error_type_main(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config11_25'
+    # table_name = 'encoder_sample_config11_25'
+
+    # table_name = 'pretrain_encoder_sample_no_pretrain_config1_25'
+    table_name = 'pretrain_encoder_sample_config1_pretrain41_30'
     calculate_error_type_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
     # calculate_error_type_main2(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

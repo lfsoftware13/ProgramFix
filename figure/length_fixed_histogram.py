@@ -29,14 +29,14 @@ def length_figure(code_length, compile_res, part_compile_res):
     error_length = list(filter(lambda x: x is not None, error_length))
     print(len(code_length), len(true_length))
 
-    f = plt.figure(figsize=(2, 1.5))
+    f = plt.figure(figsize=(4, 3))
     n, bins, patches = plt.hist([true_length, error_length], 26, stacked=True, ec='gray', label=['Fixed', 'Unfixed'])
     print(sum(n[0]), sum(n[1]))
     plt.xlabel('Code Length')
     plt.ylabel('Count of Code')
     plt.legend()
     plt.show()
-    f.savefig('code_length_histogram_0.5.pdf', bbox_inches='tight', dpi=300)
+    f.savefig('code_length_histogram_0.5.pdf', bbox_inches='tight')
 
 
 def length_main(db_path, table_name):
@@ -46,5 +46,5 @@ def length_main(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config11_23'
+    table_name = 'encoder_sample_config11_25'
     length_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

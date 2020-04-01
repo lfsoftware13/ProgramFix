@@ -7,7 +7,8 @@ from common.util import disk_cache
 from experiment.parse_xy_util import parse_error_tokens_and_action_map, parse_test_tokens, \
     parse_output_and_position_map, parse_error_tokens_and_action_map_encoder_copy, \
     parse_iterative_sample_action_error_code
-from read_data.load_data_vocabulary import create_common_error_vocabulary, create_deepfix_common_error_vocabulary
+from read_data.load_data_vocabulary import create_common_error_vocabulary, create_deepfix_common_error_vocabulary, \
+    load_deepfix_common_error_vocabulary
 from read_data.read_experiment_data import read_fake_common_c_error_dataset_with_limit_length, read_deepfix_error_data, \
     read_grammar_sample_error_data, read_fake_common_deepfix_error_dataset_with_limit_length, read_deepfix_ac_data
 
@@ -407,9 +408,7 @@ def load_deepfix_error_data():
 
 # @disk_cache(basename='load_fake_deepfix_dataset_iterate_error_data_sample_100', directory=CACHE_DATA_PATH)
 def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, merge_action=True, sequence_output=False):
-    vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
-                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
-                                                   addition_tokens=['<PAD>'])
+    vocab = load_deepfix_common_error_vocabulary()
 
     train, valid, test = read_fake_common_deepfix_error_dataset_with_limit_length(500)
 
@@ -468,9 +467,7 @@ def load_fake_deepfix_dataset_iterate_error_data_sample_100(do_flatten=False, me
 
 # @disk_cache(basename='load_fake_deepfix_dataset_iterate_error_data', directory=CACHE_DATA_PATH)
 def load_fake_deepfix_dataset_iterate_error_data(do_flatten=False, merge_action=True, sequence_output=False):
-    vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
-                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
-                                                   addition_tokens=['<PAD>'])
+    vocab = load_deepfix_common_error_vocabulary()
 
     train, valid, test = read_fake_common_deepfix_error_dataset_with_limit_length(500)
 
@@ -641,7 +638,7 @@ def flatten_iterative_data(data_dict):
     flatten_dict = {}
     records = []
     for i in range(len(data_dict['error_token_id_list'])):
-        prog_id = data_dict['id']
+        prog_id = data_dict['id'].iloc[i]
         error_token_id_list = data_dict['error_token_id_list'].iloc[i]
         sample_error_id_list = data_dict['sample_error_id_list'].iloc[i]
         sample_ac_id_list = data_dict['sample_ac_id_list'].iloc[i]

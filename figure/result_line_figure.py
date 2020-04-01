@@ -79,5 +79,5 @@ def statistics_score(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config11_23'
+    table_name = 'encoder_sample_config11_25'
     statistics_score(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

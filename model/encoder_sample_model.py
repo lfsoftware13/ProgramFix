@@ -729,10 +729,10 @@ def create_parse_input_batch_data_fn(use_ast=False, p2_type='static', feedforwar
             adjacent_tuple = torch.LongTensor(adjacent_tuple)
             adjacent_values = torch.ones(adjacent_tuple.shape[1]).long()
             adjacent_size = torch.Size([len(batch_data['input_length']), size, size])
-            info('batch_data input_length: ' + str(batch_data['input_length']))
-            info('size: ' + str(size))
-            info('adjacent_tuple: ' + str(adjacent_tuple.shape))
-            info('adjacent_size: ' + str(adjacent_size))
+            # info('batch_data input_length: ' + str(batch_data['input_length']))
+            # info('size: ' + str(size))
+            # info('adjacent_tuple: ' + str(adjacent_tuple.shape))
+            # info('adjacent_size: ' + str(adjacent_size))
             adjacent_matrix = to_cuda(
                 torch.sparse.LongTensor(
                     adjacent_tuple,

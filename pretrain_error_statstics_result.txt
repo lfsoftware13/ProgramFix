@@ -1,0 +1,53 @@
+code level in pretrain_encoder_sample_no_pretrain_config1_25 | unfixed (fixed) \ total
+<CODE> undeclared (first use in this function): 1867(1554) \ 3421
+expected <CODE> before <CODE> token: 408(1261) \ 1669
+expected <CODE> before <CODE>: 229(1101) \ 1330
+expected expression before <CODE> token: 348(685) \ 1033
+expected identifier or <CODE> before <CODE> token: 571(145) \ 716
+expected identifier or <CODE> before <CODE>: 588(52) \ 640
+expected declaration or statement at end of input: 249(322) \ 571
+expected expression before <CODE>: 90(143) \ 233
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 183(47) \ 230
+expected statement before <CODE> token: 79(148) \ 227
+
+
+errors messages in pretrain_encoder_sample_no_pretrain_config1_25 | unfixed (fixed) \ total
+<CODE> undeclared (first use in this function): 3016(2409) \ 5425
+expected <CODE> before <CODE> token: 541(1617) \ 2158
+expected <CODE> before <CODE>: 286(1223) \ 1509
+expected expression before <CODE> token: 484(831) \ 1315
+expected identifier or <CODE> before <CODE>: 1178(-276) \ 902
+expected identifier or <CODE> before <CODE> token: 1638(-804) \ 834
+expected declaration or statement at end of input: 313(351) \ 664
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 416(-29) \ 387
+expected expression before <CODE>: 95(181) \ 276
+<CODE> without a previous <CODE>: 138(131) \ 269
+expected statement before <CODE> token: 95(171) \ 266
+
+
+code level in pretrain_encoder_sample_config1_pretrain41_30 | unfixed (fixed) \ total
+<CODE> undeclared (first use in this function): 1734(1687) \ 3421
+expected <CODE> before <CODE> token: 326(1343) \ 1669
+expected <CODE> before <CODE>: 242(1088) \ 1330
+expected expression before <CODE> token: 251(782) \ 1033
+expected identifier or <CODE> before <CODE> token: 614(102) \ 716
+expected identifier or <CODE> before <CODE>: 640(0) \ 640
+expected declaration or statement at end of input: 199(372) \ 571
+expected expression before <CODE>: 119(114) \ 233
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 160(70) \ 230
+expected statement before <CODE> token: 114(113) \ 227
+
+
+errors messages in pretrain_encoder_sample_config1_pretrain41_30 | unfixed (fixed) \ total
+<CODE> undeclared (first use in this function): 2674(2751) \ 5425
+expected <CODE> before <CODE> token: 412(1746) \ 2158
+expected <CODE> before <CODE>: 286(1223) \ 1509
+expected expression before <CODE> token: 309(1006) \ 1315
+expected identifier or <CODE> before <CODE>: 932(-30) \ 902
+expected identifier or <CODE> before <CODE> token: 761(73) \ 834
+expected declaration or statement at end of input: 223(441) \ 664
+expected <CODE>, <CODE>, <CODE>, <CODE> or <CODE> before <CODE> token: 333(54) \ 387
+expected expression before <CODE>: 132(144) \ 276
+<CODE> without a previous <CODE>: 194(75) \ 269
+expected statement before <CODE> token: 133(133) \ 266
+

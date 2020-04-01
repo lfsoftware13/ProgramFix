@@ -3,6 +3,7 @@ import random
 
 import torch
 import pandas as pd
+import numpy as np
 
 from torch import nn, optim
 from tqdm import tqdm
@@ -23,10 +24,12 @@ IGNORE_TOKEN = -1
 
 
 def get_model(model_fn, model_params, path, load_previous=False, parallel=False, gpu_index=None,
-              random_embedding=False, vocabulary=None, has_delimiter=False):
+              random_embedding=False, vocabulary=None, has_delimiter=False,
+              load_pretrain_model=False, pretrain_model_fn=None, pretrain_model_params=None, pretrain_path=None):
     m = model_fn(
         **model_params
     )
+
     # to_cuda(m)
     if parallel:
         m = nn.DataParallel(m.cuda(), device_ids=[0, 1])
@@ -34,6 +37,20 @@ def get_model(model_fn, model_params, path, load_previous=False, parallel=False,
         m = nn.DataParallel(m.cuda(), device_ids=[gpu_index])
     else:
         m = nn.DataParallel(m.cuda(), device_ids=[0])
+
+    if load_pretrain_model:
+        pre_m = pretrain_model_fn(**pretrain_model_params)
+        pre_m = nn.DataParallel(pre_m.cuda(), device_ids=[gpu_index])
+        torch_util.load_model(pre_m, pretrain_path)
+
+        m_state_dict = m.state_dict()
+        pre_state_dict = pre_m.state_dict()
+        pre_state_dict = {k.replace(r'.discriminator', ''):v for k,v in pre_state_dict.items()}
+        pre_state_dict = {k:v for k, v in pre_state_dict.items() if k in m_state_dict}
+
+        m_state_dict.update(pre_state_dict)
+        m.load_state_dict(m_state_dict)
+
     if load_previous:
         # torch_util.load_model(m, path, map_location={'cuda:0': 'cuda:1'})
         torch_util.load_model(m, path)
@@ -73,13 +90,15 @@ def train(model, dataset, batch_size, loss_function, optimizer, clip_norm, epoch
             loss.backward()
             optimizer.step()
 
-            output_ids = create_output_ids_fn(model_output, model_input, False)
-            for evaluator in evaluate_obj_list:
-                evaluator.add_result(output_ids, model_output, model_target, model_input, batch_data=batch_data)
-
             total_loss += loss.data
 
-            step_output = 'in train step {}  loss: {}'.format(steps, loss.data.item())
+            step_output = 'in train step {}  loss: {}, '.format(steps, loss.data.item())
+
+            output_ids = create_output_ids_fn(model_output, model_input, False)
+            for evaluator in evaluate_obj_list:
+                res = evaluator.add_result(output_ids, model_output, model_target, model_input, batch_data=batch_data)
+                step_output += res
+
             # print(step_output)
             info(step_output)
 
@@ -685,6 +704,7 @@ if __name__ == '__main__':
     torch.manual_seed(100)
     torch.cuda.manual_seed_all(100)
     random.seed(100)
+    np.random.seed(100)
 
     import sys
 
@@ -780,6 +800,14 @@ if __name__ == '__main__':
     create_save_database_records_fn = p_config.get('create_save_database_records_fn', None)
 
     model_path = os.path.join(save_root_path, p_config['load_model_name'])
+
+    # reload pretrain graph encoder
+    load_pretrain_model = p_config.get('load_pretrain_model', False)
+    pretrain_model_fn = p_config.get('pretrain_model_fn', None)
+    pretrain_model_params = p_config.get('pretrain_model_params', None)
+    pretrain_model_path = p_config.get('pretrain_model_path', None)
+    if pretrain_model_path is not None:
+        pretrain_model_path = os.path.join(save_root_path, pretrain_model_path)
     model = get_model(
         p_config['model_fn'],
         p_config['model_dict'],
@@ -789,7 +817,11 @@ if __name__ == '__main__':
         gpu_index=problem_util.GPU_INDEX,
         vocabulary=vocabulary,
         random_embedding=random_embedding,
-        has_delimiter=use_ast
+        has_delimiter=use_ast,
+        load_pretrain_model=load_pretrain_model,
+        pretrain_model_fn=pretrain_model_fn,
+        pretrain_model_params=pretrain_model_params,
+        pretrain_path=pretrain_model_path,
     )
 
     train_data, val_data, test_data, ac_copy_data = p_config.get("data")

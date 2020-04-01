@@ -46,6 +46,6 @@ def stat_main(db_path, table_name, compile_result=True, part_correct=True, error
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config4_20'
+    table_name = 'pretrain_encoder_sample_no_pretrain_config1_33'
     stat_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)
 

@@ -3,9 +3,9 @@ import json
 import more_itertools
 
 from common.analyse_include_util import extract_include, replace_include_with_blank
-from common.constants import CACHE_DATA_PATH
+from common.constants import CACHE_DATA_PATH, pre_defined_c_tokens
 from common.pycparser_util import tokenize_by_clex_fn
-from common.util import disk_cache
+from common.util import disk_cache, create_effect_keyword_ids_set
 from read_data.read_experiment_data import read_fake_common_c_error_dataset_with_limit_length, \
     read_fake_common_deepfix_error_dataset_with_limit_length
 from vocabulary.word_vocabulary import load_vocabulary
@@ -103,13 +103,28 @@ def create_deepfix_common_error_vocabulary(begin_tokens, end_tokens, unk_token, 
     return vocab
 
 
+def load_deepfix_common_error_vocabulary():
+    vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                                   addition_tokens=['<PAD>', '<MASK>'])
+    return vocab
+
+
 if __name__ == '__main__':
     # res = get_common_error_vocabulary_set()
     # print(type(res), len(res))
     # res = get_common_error_vocabulary_id_map()
     # print(type(res), len(res))
+    # vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
+    #                                                end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+    #                                                addition_tokens=['<PAD>'])
+    import numpy as np
+    np.random.seed(100)
     vocab = create_deepfix_common_error_vocabulary(begin_tokens=['<BEGIN>', '<INNER_BEGIN>'],
-                                                   end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
-                                                   addition_tokens=['<PAD>'])
-    print(vocab.vocabulary_size)
+                                           end_tokens=['<END>', '<INNER_END>'], unk_token='<UNK>',
+                                           addition_tokens=['<PAD>', '<MASK>'])
+
+    keyword_ids = create_effect_keyword_ids_set(vocab)
+    true_keywords = pre_defined_c_tokens
+    print(vocab.vocabulary_size, len(true_keywords))
 

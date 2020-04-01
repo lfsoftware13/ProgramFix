@@ -20,7 +20,7 @@ if __name__ == '__main__':
     # table_name = 'encoder_sample_config11_23'
     # table_name = 'encoder_sample_config11_23_one_step'
     # table_name = 'encoder_sample_config11_25'
-    table_name = 'encoder_sample_config11_one_step_25'
+    # table_name = 'encoder_sample_config11_one_step_25'
     # table_name = 'encoder_sample_config12_only_gru_with_token_action_11'
     # table_name = 'encoder_sample_config12_only_gru_with_token_action_21'
     # table_name = 'encoder_sample_config12_only_gru_with_token_action_27'
@@ -33,6 +33,15 @@ if __name__ == '__main__':
     # table_name = 'sensibility_rnn_config2_81_filter'
     # table_name = 'encoder_sample_config15_sequence_output_63'
     # table_name = 'encoder_sample_config18_24'
+
+
+    # pretrain experiment result
+    # table_name = 'pretrain_encoder_sample_no_pretrain_config1_25'
+    # table_name = 'pretrain_encoder_sample_config1_pretrain41_30'
+    # table_name = 'pretrain_encoder_sample_config2_pretrain13_30'
+    # table_name = 'pretrain_encoder_sample_config4_gene20_pretrain38_27'
+    table_name = 'pretrain_encoder_sample_config5_pretrain35_31'
+
 
     main_insert_unsample_records_to_database(db_path, table_name)
     resave_original_errors_info_main(db_path, table_name)

@@ -15,6 +15,7 @@ def step_bar_figure(c):
     plt.ylabel('Count of Code')
     plt.xlabel('Sample Steps')
     plt.xticks(ind, [str(i) for i in ind])
+    plt.legend(fontsize=8, )
 
     plt.show()
     f.savefig('sample_steps_count.png', bbox_inches='tight', dpi=300)
@@ -34,5 +35,5 @@ def draw_sample_step_main(db_path, table_name):
 
 if __name__ == '__main__':
     from config import DATA_RECORDS_DEEPFIX_DBPATH
-    table_name = 'encoder_sample_config11_23'
+    table_name = 'encoder_sample_config11_25'
     draw_sample_step_main(DATA_RECORDS_DEEPFIX_DBPATH, table_name)

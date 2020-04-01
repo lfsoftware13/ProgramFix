@@ -1,10 +1,11 @@
+from common.analyse_include_util import replace_include_with_blank
 from common.pycparser_util import tokenize_by_clex_fn
 from read_data.read_filter_data_records import read_distinct_problem_user_compile_success_c_records, \
     read_distinct_problem_user_fake_c_common_records, read_distinct_problem_user_fake_c_random_records, \
     read_distinct_problem_user_c_records, read_deepfix_error_records, read_filter_grammar_sample_test_records, \
     read_filter_grammar_sample_valid_records, read_filter_grammar_sample_train_records, read_deepfix_ac_records, \
     read_fake_deepfix_common_error_records
-from common.util import disk_cache, filter_length
+from common.util import disk_cache, filter_length, init_code
 from common.constants import CACHE_DATA_PATH
 
 
@@ -71,16 +72,16 @@ def read_fake_random_c_error_dataset_with_limit_length(limit_length=500):
 
 
 @disk_cache(basename='read_fake_common_deepfix_error_dataset_with_limit_length', directory=CACHE_DATA_PATH)
-def read_fake_common_deepfix_error_dataset_with_limit_length(limit_length=500):
+def read_fake_common_deepfix_error_dataset_with_limit_length(limit_length=500, random_seed=100):
     data_df = read_fake_deepfix_common_error_records()
 
     tokenize_fn = tokenize_by_clex_fn()
     data_df = filter_length(data_df, limit_length, tokenize_fn)
     print('after filter code length: {}'.format(len(data_df)))
 
-    valid_df = data_df.sample(frac=0.05)
+    valid_df = data_df.sample(frac=0.05, random_state=random_seed)
     data_df = data_df.drop(valid_df.index)
-    test_df = data_df.sample(frac=0.05)
+    test_df = data_df.sample(frac=0.05, random_state=random_seed)
     train_df = data_df.drop(test_df.index)
 
     return train_df, valid_df, test_df
@@ -103,6 +104,25 @@ def read_grammar_sample_error_data():
     train_df = read_filter_grammar_sample_train_records()
     valid_df = read_filter_grammar_sample_valid_records()
     test_df = read_filter_grammar_sample_test_records()
+    return train_df, valid_df, test_df
+
+
+def read_fake_common_deepfix_error_dataset_with_same_ids():
+    from read_data.read_data_from_db import read_fake_common_deepfix_error_records
+    data_df = read_fake_common_deepfix_error_records()
+    from read_data.read_train_ids import read_training_data_ids
+    train_ids, valid_ids, test_ids = read_training_data_ids()
+
+    data_df['similar_code'] = data_df['similar_code'].map(init_code)
+    from common.analyse_include_util import extract_include
+    data_df['includes'] = data_df['similar_code'].map(extract_include)
+    data_df['similar_code_with_includes'] = data_df['similar_code']
+
+    data_df['similar_code'] = data_df['similar_code'].map(replace_include_with_blank).map(lambda x: x.replace('\r', ''))
+
+    train_df = data_df[data_df['id'].map(lambda x: x in set(train_ids))]
+    valid_df = data_df[data_df['id'].map(lambda x: x in set(valid_ids))]
+    test_df = data_df[data_df['id'].map(lambda x: x in set(test_ids))]
     return train_df, valid_df, test_df
 
 

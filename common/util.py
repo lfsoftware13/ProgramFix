@@ -332,7 +332,7 @@ def group_df_to_grouped_list(data_df, groupby_key):
 
 def filter_length(df, limit_length, tokenize_fn, code_key='similar_code'):
     df['tokens'] = df[code_key].map(tokenize_fn)
-    df = df[df['tokens'].map(lambda x: len(x) < limit_length)].copy()
+    df = df[df['tokens'].map(lambda x: x is not None and len(x) < limit_length)].copy()
     df = df.drop(columns=['tokens'], axis=1)
     return df
 
@@ -1133,8 +1133,9 @@ if __name__ == '__main__':
 
 
 def create_effect_keyword_ids_set(keyword_vocab):
-    from common.constants import pre_defined_c_label, pre_defined_c_library_tokens
-    keyword = pre_defined_c_label | pre_defined_c_library_tokens
+    from common.constants import pre_defined_c_label, pre_defined_c_library_tokens, pre_defined_c_tokens
+    # keyword = pre_defined_c_label | pre_defined_c_library_tokens
+    keyword = pre_defined_c_tokens | pre_defined_c_library_tokens
     effect_vocabulary_word = keyword_vocab.word_to_id_dict.keys()
     keyword_ids = [keyword_vocab.word_to_id(key) if key in effect_vocabulary_word else None for key in keyword]
     keyword_ids = set(filter(lambda x: x is not None, keyword_ids))
